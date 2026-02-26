@@ -1,23 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@photon-ai/imessage-kit", () => ({
+  IMessageSDK: vi.fn(),
+}));
+
+vi.mock("@photon-ai/advanced-imessage-kit", () => ({
+  AdvancedIMessageKit: {
+    getInstance: vi.fn(() => ({ mocked: true })),
+  },
+}));
+
 import { createiMessageAdapter, iMessageAdapter } from "./index";
 
 describe("iMessageAdapter", () => {
   it("should have the correct name", () => {
     const adapter = new iMessageAdapter({ local: true });
     expect(adapter.name).toBe("imessage");
-  });
-
-  it("should use default userName", () => {
-    const adapter = new iMessageAdapter({ local: true });
-    expect(adapter.userName).toBe("iMessage Bot");
-  });
-
-  it("should accept custom userName", () => {
-    const adapter = new iMessageAdapter({
-      local: true,
-      userName: "Custom Bot",
-    });
-    expect(adapter.userName).toBe("Custom Bot");
   });
 
   it("should store local mode config", () => {
@@ -45,6 +43,29 @@ describe("iMessageAdapter", () => {
     expect(adapter.local).toBe(false);
     expect(adapter.serverUrl).toBe("https://example.com");
     expect(adapter.apiKey).toBe("test-key");
+  });
+
+  it("should create IMessageSDK for local mode", async () => {
+    const { IMessageSDK } = await import("@photon-ai/imessage-kit");
+    const adapter = new iMessageAdapter({ local: true });
+    expect(IMessageSDK).toHaveBeenCalled();
+    expect(adapter.sdk).toBeDefined();
+  });
+
+  it("should create AdvancedIMessageKit for remote mode", async () => {
+    const { AdvancedIMessageKit } = await import(
+      "@photon-ai/advanced-imessage-kit"
+    );
+    const adapter = new iMessageAdapter({
+      local: false,
+      serverUrl: "https://example.com",
+      apiKey: "test-key",
+    });
+    expect(AdvancedIMessageKit.getInstance).toHaveBeenCalledWith({
+      serverUrl: "https://example.com",
+      apiKey: "test-key",
+    });
+    expect(adapter.sdk).toBeDefined();
   });
 });
 

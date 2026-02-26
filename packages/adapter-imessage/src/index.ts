@@ -1,3 +1,7 @@
+import {
+  AdvancedIMessageKit,
+} from "@photon-ai/advanced-imessage-kit";
+import { IMessageSDK } from "@photon-ai/imessage-kit";
 import type {
   Adapter,
   AdapterPostableMessage,
@@ -19,14 +23,12 @@ export interface iMessageAdapterLocalConfig {
   apiKey?: string;
   local: true;
   serverUrl?: string;
-  userName?: string;
 }
 
 export interface iMessageAdapterRemoteConfig {
   apiKey: string;
   local: false;
   serverUrl: string;
-  userName?: string;
 }
 
 export type iMessageAdapterConfig =
@@ -35,17 +37,25 @@ export type iMessageAdapterConfig =
 
 export class iMessageAdapter implements Adapter {
   readonly name = "imessage";
-  readonly userName: string;
+  readonly userName: string = "";
   readonly local: boolean;
   readonly serverUrl?: string;
   readonly apiKey?: string;
+  readonly sdk: IMessageSDK | AdvancedIMessageKit;
 
   constructor(config: iMessageAdapterConfig) {
-    this.userName = config.userName ?? "iMessage Bot";
     this.local = config.local;
-
     this.serverUrl = config.serverUrl;
     this.apiKey = config.apiKey;
+
+    if (config.local) {
+      this.sdk = new IMessageSDK();
+    } else {
+      this.sdk = AdvancedIMessageKit.getInstance({
+        serverUrl: config.serverUrl,
+        apiKey: config.apiKey,
+      });
+    }
   }
 
   async initialize(_chat: ChatInstance): Promise<void> {
@@ -178,7 +188,6 @@ export function createiMessageAdapter(
       local: true,
       serverUrl: config?.serverUrl ?? process.env.IMESSAGE_SERVER_URL,
       apiKey: config?.apiKey ?? process.env.IMESSAGE_API_KEY,
-      userName: config?.userName,
     });
   }
 
@@ -200,6 +209,5 @@ export function createiMessageAdapter(
     local: false,
     serverUrl,
     apiKey,
-    userName: config?.userName,
   });
 }
