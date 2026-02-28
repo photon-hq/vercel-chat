@@ -215,11 +215,11 @@ export class iMessageAdapter implements Adapter {
     );
   }
 
-  parseMessage(_raw: unknown): Message {
-    throw new NotImplementedError(
-      "parseMessage is not implemented",
-      "parseMessage"
-    );
+  parseMessage(raw: unknown): Message {
+    const data = this.local
+      ? this.normalizeLocalMessage(raw as IMessageLocalMessage)
+      : this.normalizeRemoteMessage(raw as MessageResponse);
+    return this.buildMessage(data);
   }
 
   async fetchMessages(
@@ -614,16 +614,9 @@ export class iMessageAdapter implements Adapter {
     });
   }
 
-  private async handleGatewayMessage(
-    data: iMessageGatewayMessageData
-  ): Promise<void> {
-    if (!this.chat) {
-      return;
-    }
-
+  private buildMessage(data: iMessageGatewayMessageData): Message {
     const threadId = this.encodeThreadId({ chatGuid: data.chatId });
-
-    const chatMessage = new Message({
+    return new Message({
       id: data.guid,
       threadId,
       text: data.text ?? "",
@@ -648,9 +641,23 @@ export class iMessageAdapter implements Adapter {
       raw: data.raw ?? data,
       isMention: !data.isGroupChat,
     });
+  }
+
+  private async handleGatewayMessage(
+    data: iMessageGatewayMessageData
+  ): Promise<void> {
+    if (!this.chat) {
+      return;
+    }
+
+    const chatMessage = this.buildMessage(data);
 
     try {
-      await this.chat.handleIncomingMessage(this, threadId, chatMessage);
+      await this.chat.handleIncomingMessage(
+        this,
+        chatMessage.threadId,
+        chatMessage
+      );
     } catch (error) {
       this.logger?.error("Error handling iMessage gateway message", {
         error: String(error),
