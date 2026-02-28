@@ -77,7 +77,7 @@ Local mode requires the adapter to run directly on a macOS machine with iMessage
 
 1. Grant **Full Disk Access** to your terminal or application in **System Settings → Privacy & Security → Full Disk Access**
 2. Ensure iMessage is signed in and working on the Mac
-3. If using webhook mode, set `IMESSAGE_API_KEY` (see [Webhook](#webhook) below)
+3. If using webhook mode, set `IMESSAGE_GATEWAY_TOKEN` (see [Webhook](#webhook) below)
 
 ## Receiving messages
 
@@ -102,8 +102,8 @@ For setups where `imessage-kit` runs on a separate Mac, you can configure it to 
 
 **Requirements:**
 
-- `apiKey` must be configured on the adapter (via `IMESSAGE_API_KEY` env var or the `apiKey` config option)
-- The `imessage-kit` instance must send the `x-imessage-gateway-token` header with the same API key value
+- `token` must be configured on the adapter (via `IMESSAGE_GATEWAY_TOKEN` env var or the `token` config option)
+- The `imessage-kit` instance must send the `x-imessage-gateway-token` header with the same token value
 
 ```typescript title="lib/bot.ts"
 // In your webhook route handler (e.g., Next.js API route)
@@ -121,7 +121,8 @@ const response = await adapter.handleWebhook(request, {
 |--------|----------|-------------|
 | `local` | No | `true` for local mode, `false` for remote. Auto-detected from `IMESSAGE_LOCAL` (default: `true`) |
 | `serverUrl` | Remote only | URL of the remote iMessage server. Auto-detected from `IMESSAGE_SERVER_URL` |
-| `apiKey` | Remote mode; webhook mode | API key for authentication. Also used to verify `x-imessage-gateway-token` in webhook mode. Auto-detected from `IMESSAGE_API_KEY` |
+| `apiKey` | Remote only | API key for remote server authentication. Auto-detected from `IMESSAGE_API_KEY` |
+| `token` | Webhook mode | Token for authenticating incoming webhooks via the `x-imessage-gateway-token` header. Auto-detected from `IMESSAGE_GATEWAY_TOKEN` |
 | `logger` | No | Logger instance (defaults to `ConsoleLogger("info")`) |
 
 ## Environment variables
@@ -129,7 +130,8 @@ const response = await adapter.handleWebhook(request, {
 ```bash title=".env.local"
 IMESSAGE_LOCAL=false                 # Set to "false" for remote mode (default: true)
 IMESSAGE_SERVER_URL=https://...       # Required for remote mode
-IMESSAGE_API_KEY=...                 # Required for remote mode and webhook mode
+IMESSAGE_API_KEY=...                 # Required for remote mode
+IMESSAGE_GATEWAY_TOKEN=...          # Required for webhook mode
 ```
 
 ## Features

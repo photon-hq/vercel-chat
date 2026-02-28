@@ -298,7 +298,7 @@ describe("handleWebhook", () => {
     const adapter = new iMessageAdapter({
       local: true,
       logger: mockLogger,
-      apiKey: "key",
+      token: "key",
     });
     await adapter.initialize(createMockChat() as never);
 
@@ -313,7 +313,7 @@ describe("handleWebhook", () => {
     expect(text).toBe("Missing x-imessage-gateway-token header");
   });
 
-  it("should return 401 when apiKey is not configured", async () => {
+  it("should return 401 when token is not configured", async () => {
     const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     await adapter.initialize(createMockChat() as never);
 
@@ -328,7 +328,7 @@ describe("handleWebhook", () => {
     const response = await adapter.handleWebhook(request);
     expect(response.status).toBe(401);
     const text = await response.text();
-    expect(text).toBe("apiKey must be configured to accept webhooks");
+    expect(text).toBe("token must be configured to accept webhooks");
   });
 
   it("should reject invalid gateway token", async () => {
@@ -337,6 +337,7 @@ describe("handleWebhook", () => {
       logger: mockLogger,
       serverUrl: "https://example.com",
       apiKey: "correct-key",
+      token: "correct-token",
     });
     await adapter.initialize(createMockChat() as never);
 
@@ -357,7 +358,7 @@ describe("handleWebhook", () => {
     const adapter = new iMessageAdapter({
       local: true,
       logger: mockLogger,
-      apiKey: "key",
+      token: "key",
     });
     await adapter.initialize(createMockChat() as never);
 
@@ -378,7 +379,7 @@ describe("handleWebhook", () => {
     const adapter = new iMessageAdapter({
       local: true,
       logger: mockLogger,
-      apiKey: "key",
+      token: "key",
     });
     await adapter.initialize(mockChat as never);
 
@@ -435,7 +436,7 @@ describe("handleWebhook", () => {
     const adapter = new iMessageAdapter({
       local: true,
       logger: mockLogger,
-      apiKey: "key",
+      token: "key",
     });
     await adapter.initialize(createMockChat() as never);
 
@@ -1171,5 +1172,19 @@ describe("createiMessageAdapter", () => {
     expect(adapter.local).toBe(true);
     expect(adapter.serverUrl).toBe("http://localhost:5678");
     expect(adapter.apiKey).toBe("local-key");
+  });
+
+  it("should read IMESSAGE_GATEWAY_TOKEN env var", () => {
+    vi.stubEnv("IMESSAGE_GATEWAY_TOKEN", "my-webhook-token");
+
+    const adapter = createiMessageAdapter({ local: true });
+    expect(adapter.token).toBe("my-webhook-token");
+  });
+
+  it("should prefer token config over IMESSAGE_GATEWAY_TOKEN env var", () => {
+    vi.stubEnv("IMESSAGE_GATEWAY_TOKEN", "env-token");
+
+    const adapter = createiMessageAdapter({ local: true, token: "config-token" });
+    expect(adapter.token).toBe("config-token");
   });
 });

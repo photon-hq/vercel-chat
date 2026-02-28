@@ -45,6 +45,8 @@ export interface iMessageAdapterLocalConfig {
   local: true;
   logger: Logger;
   serverUrl?: string;
+  /** Token for authenticating incoming webhooks via the `x-imessage-gateway-token` header */
+  token?: string;
 }
 
 export interface iMessageAdapterRemoteConfig {
@@ -52,6 +54,8 @@ export interface iMessageAdapterRemoteConfig {
   local: false;
   logger: Logger;
   serverUrl: string;
+  /** Token for authenticating incoming webhooks via the `x-imessage-gateway-token` header */
+  token?: string;
 }
 
 export type iMessageAdapterConfig =
@@ -64,6 +68,8 @@ export class iMessageAdapter implements Adapter {
   readonly local: boolean;
   readonly serverUrl?: string;
   readonly apiKey?: string;
+  /** Token for authenticating incoming webhooks via the `x-imessage-gateway-token` header */
+  readonly token?: string;
   readonly sdk: IMessageSDK | AdvancedIMessageKit;
 
   private chat: ChatInstance | null = null;
@@ -82,6 +88,7 @@ export class iMessageAdapter implements Adapter {
     this.local = config.local;
     this.serverUrl = config.serverUrl;
     this.apiKey = config.apiKey;
+    this.token = config.token;
     this.logger = config.logger;
 
     if (config.local) {
@@ -119,17 +126,17 @@ export class iMessageAdapter implements Adapter {
       });
     }
 
-    if (!this.apiKey) {
+    if (!this.token) {
       this.logger.warn(
-        "Webhook received but apiKey is not configured — set IMESSAGE_API_KEY to accept webhooks"
+        "Webhook received but token is not configured — set IMESSAGE_GATEWAY_TOKEN or pass token in config"
       );
       return new Response(
-        "apiKey must be configured to accept webhooks",
+        "token must be configured to accept webhooks",
         { status: 401 }
       );
     }
 
-    if (gatewayToken !== this.apiKey) {
+    if (gatewayToken !== this.token) {
       this.logger.warn("Invalid gateway token");
       return new Response("Invalid gateway token", { status: 401 });
     }
@@ -819,6 +826,7 @@ export function createiMessageAdapter(
 ): iMessageAdapter {
   const local = config?.local ?? process.env.IMESSAGE_LOCAL !== "false";
   const logger = config?.logger ?? new ConsoleLogger("info").child("imessage");
+  const token = config?.token ?? process.env.IMESSAGE_GATEWAY_TOKEN;
 
   if (local) {
     return new iMessageAdapter({
@@ -826,6 +834,7 @@ export function createiMessageAdapter(
       logger,
       serverUrl: config?.serverUrl ?? process.env.IMESSAGE_SERVER_URL,
       apiKey: config?.apiKey ?? process.env.IMESSAGE_API_KEY,
+      token,
     });
   }
 
@@ -850,5 +859,6 @@ export function createiMessageAdapter(
     logger,
     serverUrl,
     apiKey,
+    token,
   });
 }
