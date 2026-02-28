@@ -23,7 +23,6 @@ export default function Home() {
       <pre>
         {`IMESSAGE_SERVER_URL=https://your-imessage-server.example.com
 IMESSAGE_API_KEY=your-api-key
-OPENAI_API_KEY=sk-...
 REDIS_URL=redis://localhost:6379`}
       </pre>
     </main>
