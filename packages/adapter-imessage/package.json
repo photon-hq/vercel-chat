@@ -1,6 +1,6 @@
 {
   "name": "@chat-adapter/imessage",
-  "version": "0.0.0",
+  "version": "4.14.0",
   "description": "iMessage adapter for chat",
   "type": "module",
   "main": "./dist/index.js",
@@ -24,6 +24,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@chat-adapter/shared": "workspace:*",
     "@photon-ai/advanced-imessage-kit": "^1.14.3",
     "@photon-ai/imessage-kit": "^2.1.2",
     "chat": "workspace:*"

@@ -1,3 +1,4 @@
+import { ValidationError } from "@chat-adapter/shared";
 import type { MessageResponse } from "@photon-ai/advanced-imessage-kit";
 import { AdvancedIMessageKit } from "@photon-ai/advanced-imessage-kit";
 import type { Message as IMessageLocalMessage } from "@photon-ai/imessage-kit";
@@ -15,7 +16,13 @@ import type {
   ThreadInfo,
   WebhookOptions,
 } from "chat";
-import { Message, NotImplementedError, parseMarkdown } from "chat";
+import {
+  ConsoleLogger,
+  Message,
+  NotImplementedError,
+  parseMarkdown,
+} from "chat";
+import { iMessageFormatConverter } from "./markdown";
 import type {
   iMessageForwardedEvent,
   iMessageGatewayMessageData,
@@ -23,8 +30,7 @@ import type {
   NativeWebhookPayload,
 } from "./types";
 
-export type { AdvancedIMessageKit } from "@photon-ai/advanced-imessage-kit";
-export type { IMessageSDK } from "@photon-ai/imessage-kit";
+export { iMessageFormatConverter } from "./markdown";
 export type {
   iMessageForwardedEvent,
   iMessageGatewayEventType,
@@ -36,12 +42,14 @@ export type {
 export interface iMessageAdapterLocalConfig {
   apiKey?: string;
   local: true;
+  logger: Logger;
   serverUrl?: string;
 }
 
 export interface iMessageAdapterRemoteConfig {
   apiKey: string;
   local: false;
+  logger: Logger;
   serverUrl: string;
 }
 
@@ -58,11 +66,13 @@ export class iMessageAdapter implements Adapter {
   readonly sdk: IMessageSDK | AdvancedIMessageKit;
 
   private chat: ChatInstance | null = null;
-  private logger: Logger | null = null;
+  private readonly logger: Logger;
+  private readonly formatConverter = new iMessageFormatConverter();
 
   constructor(config: iMessageAdapterConfig) {
     if (config.local && process.platform !== "darwin") {
-      throw new Error(
+      throw new ValidationError(
+        "imessage",
         "iMessage adapter local mode requires macOS. Current platform: " +
           process.platform
       );
@@ -71,6 +81,7 @@ export class iMessageAdapter implements Adapter {
     this.local = config.local;
     this.serverUrl = config.serverUrl;
     this.apiKey = config.apiKey;
+    this.logger = config.logger;
 
     if (config.local) {
       this.sdk = new IMessageSDK();
@@ -84,7 +95,6 @@ export class iMessageAdapter implements Adapter {
 
   async initialize(chat: ChatInstance): Promise<void> {
     this.chat = chat;
-    this.logger = chat.getLogger("imessage");
     this.logger.info("iMessage adapter initialized", {
       local: this.local,
       serverUrl: this.serverUrl ? "configured" : "not configured",
@@ -104,7 +114,7 @@ export class iMessageAdapter implements Adapter {
     const gatewayToken = request.headers.get("x-imessage-gateway-token");
     if (gatewayToken) {
       if (this.apiKey && gatewayToken !== this.apiKey) {
-        this.logger?.warn("Invalid gateway token");
+        this.logger.warn("Invalid gateway token");
         return new Response("Invalid gateway token", { status: 401 });
       }
 
@@ -128,7 +138,7 @@ export class iMessageAdapter implements Adapter {
 
       // Native imessage-kit webhook: the SDK POSTs the Message object directly
       if (typeof obj.guid === "string" && typeof obj.chatId === "string") {
-        this.logger?.info("Native iMessage SDK webhook received", {
+        this.logger.info("Native iMessage SDK webhook received", {
           guid: obj.guid as string,
         });
         const data = this.normalizeNativeWebhookMessage(
@@ -141,7 +151,7 @@ export class iMessageAdapter implements Adapter {
         });
       }
 
-      this.logger?.warn("Unrecognized gateway webhook payload");
+      this.logger.warn("Unrecognized gateway webhook payload");
       return new Response("Unrecognized payload", { status: 400 });
     }
 
@@ -153,7 +163,7 @@ export class iMessageAdapter implements Adapter {
     message: AdapterPostableMessage
   ): Promise<RawMessage> {
     const { chatGuid } = this.decodeThreadId(threadId);
-    const text = typeof message === "string" ? message : String(message);
+    const text = this.formatConverter.renderPostable(message);
 
     if (this.local) {
       const sdk = this.sdk as IMessageSDK;
@@ -194,7 +204,7 @@ export class iMessageAdapter implements Adapter {
       );
     }
 
-    const text = typeof message === "string" ? message : String(message);
+    const text = this.formatConverter.renderPostable(message);
     const sdk = this.sdk as AdvancedIMessageKit;
     const result = await sdk.messages.editMessage({
       messageGuid: messageId,
@@ -318,11 +328,8 @@ export class iMessageAdapter implements Adapter {
     setTimeout(() => sdk.chats.stopTyping(chatGuid), 3000);
   }
 
-  renderFormatted(_content: FormattedContent): string {
-    throw new NotImplementedError(
-      "renderFormatted is not implemented",
-      "renderFormatted"
-    );
+  renderFormatted(content: FormattedContent): string {
+    return this.formatConverter.fromAst(content);
   }
 
   encodeThreadId(platformData: iMessageThreadId): string {
@@ -332,6 +339,16 @@ export class iMessageAdapter implements Adapter {
   decodeThreadId(threadId: string): iMessageThreadId {
     const prefix = "imessage:";
     return { chatGuid: threadId.slice(prefix.length) };
+  }
+
+  /**
+   * Check if a thread is a direct message (one-on-one) conversation.
+   * DM chatGuids use ";-;" (e.g., "iMessage;-;+1234567890")
+   * Group chatGuids use ";+;" (e.g., "iMessage;+;chat123456")
+   */
+  isDM(threadId: string): boolean {
+    const { chatGuid } = this.decodeThreadId(threadId);
+    return chatGuid.includes(";-;");
   }
 
   /**
@@ -357,7 +374,7 @@ export class iMessageAdapter implements Adapter {
       return new Response("waitUntil not provided", { status: 500 });
     }
 
-    this.logger?.info("Starting iMessage Gateway listener", {
+    this.logger.info("Starting iMessage Gateway listener", {
       durationMs,
       mode: this.local ? "local" : "remote",
       webhookUrl: webhookUrl ? "configured" : "not configured",
@@ -453,7 +470,7 @@ export class iMessageAdapter implements Adapter {
             }
           },
           onError: (error: Error) => {
-            this.logger?.error("iMessage local watcher error", {
+            this.logger.error("iMessage local watcher error", {
               error: String(error),
             });
           },
@@ -488,7 +505,7 @@ export class iMessageAdapter implements Adapter {
           abortSignal.addEventListener(
             "abort",
             () => {
-              this.logger?.info(
+              this.logger.info(
                 "iMessage Gateway listener received abort signal"
               );
               clearTimeout(timeout);
@@ -499,11 +516,11 @@ export class iMessageAdapter implements Adapter {
         }
       });
 
-      this.logger?.info(
+      this.logger.info(
         "iMessage Gateway listener duration elapsed, disconnecting"
       );
     } catch (error) {
-      this.logger?.error("iMessage Gateway listener error", {
+      this.logger.error("iMessage Gateway listener error", {
         error: String(error),
       });
     } finally {
@@ -520,7 +537,7 @@ export class iMessageAdapter implements Adapter {
         await (this.sdk as AdvancedIMessageKit).close();
       }
 
-      this.logger?.info("iMessage Gateway listener stopped");
+      this.logger.info("iMessage Gateway listener stopped");
     }
   }
 
@@ -603,7 +620,7 @@ export class iMessageAdapter implements Adapter {
     event: iMessageForwardedEvent
   ): Promise<void> {
     try {
-      this.logger?.debug("Forwarding iMessage Gateway event to webhook", {
+      this.logger.debug("Forwarding iMessage Gateway event to webhook", {
         type: event.type,
         webhookUrl,
       });
@@ -618,19 +635,19 @@ export class iMessageAdapter implements Adapter {
       });
 
       if (response.ok) {
-        this.logger?.debug("Gateway event forwarded successfully", {
+        this.logger.debug("Gateway event forwarded successfully", {
           type: event.type,
         });
       } else {
         const errorText = await response.text();
-        this.logger?.error("Failed to forward Gateway event", {
+        this.logger.error("Failed to forward Gateway event", {
           type: event.type,
           status: response.status,
           error: errorText,
         });
       }
     } catch (error) {
-      this.logger?.error("Error forwarding Gateway event", {
+      this.logger.error("Error forwarding Gateway event", {
         type: event.type,
         error: String(error),
       });
@@ -641,7 +658,7 @@ export class iMessageAdapter implements Adapter {
     event: iMessageForwardedEvent,
     _options?: WebhookOptions
   ): Promise<Response> {
-    this.logger?.info("Processing forwarded Gateway event", {
+    this.logger.info("Processing forwarded Gateway event", {
       type: event.type,
       timestamp: event.timestamp,
     });
@@ -653,7 +670,7 @@ export class iMessageAdapter implements Adapter {
         );
         break;
       default:
-        this.logger?.debug("Forwarded Gateway event (no handler)", {
+        this.logger.debug("Forwarded Gateway event (no handler)", {
           type: event.type,
         });
     }
@@ -709,7 +726,7 @@ export class iMessageAdapter implements Adapter {
         chatMessage
       );
     } catch (error) {
-      this.logger?.error("Error handling iMessage gateway message", {
+      this.logger.error("Error handling iMessage gateway message", {
         error: String(error),
         messageGuid: data.guid,
       });
@@ -732,7 +749,8 @@ export class iMessageAdapter implements Adapter {
     };
     const tapback = tapbackMap[name];
     if (!tapback) {
-      throw new Error(
+      throw new ValidationError(
+        "imessage",
         `Unsupported iMessage tapback: "${name}". Supported: heart, thumbs_up, thumbs_down, laugh, emphasize, question`
       );
     }
@@ -762,10 +780,12 @@ export function createiMessageAdapter(
   config?: Partial<iMessageAdapterConfig>
 ): iMessageAdapter {
   const local = config?.local ?? process.env.IMESSAGE_LOCAL !== "false";
+  const logger = config?.logger ?? new ConsoleLogger("info").child("imessage");
 
   if (local) {
     return new iMessageAdapter({
       local: true,
+      logger,
       serverUrl: config?.serverUrl ?? process.env.IMESSAGE_SERVER_URL,
       apiKey: config?.apiKey ?? process.env.IMESSAGE_API_KEY,
     });
@@ -773,20 +793,23 @@ export function createiMessageAdapter(
 
   const serverUrl = config?.serverUrl ?? process.env.IMESSAGE_SERVER_URL;
   if (!serverUrl) {
-    throw new Error(
+    throw new ValidationError(
+      "imessage",
       "serverUrl is required when local is false. Set IMESSAGE_SERVER_URL or provide it in config."
     );
   }
 
   const apiKey = config?.apiKey ?? process.env.IMESSAGE_API_KEY;
   if (!apiKey) {
-    throw new Error(
+    throw new ValidationError(
+      "imessage",
       "apiKey is required when local is false. Set IMESSAGE_API_KEY or provide it in config."
     );
   }
 
   return new iMessageAdapter({
     local: false,
+    logger,
     serverUrl,
     apiKey,
   });

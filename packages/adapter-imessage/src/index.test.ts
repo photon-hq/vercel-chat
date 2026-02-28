@@ -61,29 +61,32 @@ vi.mock("chat", async (importOriginal) => {
   };
 });
 
+import { ValidationError } from "@chat-adapter/shared";
 import { createiMessageAdapter, iMessageAdapter } from "./index";
 import type { iMessageGatewayMessageData } from "./types";
 
+const mockLogger = {
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+  child: vi.fn(() => mockLogger),
+};
+
 function createMockChat() {
   return {
-    getLogger: vi.fn(() => ({
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-      debug: vi.fn(),
-    })),
     handleIncomingMessage: vi.fn(),
   };
 }
 
 describe("iMessageAdapter", () => {
   it("should have the correct name", () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     expect(adapter.name).toBe("imessage");
   });
 
   it("should store local mode config", () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     expect(adapter.local).toBe(true);
     expect(adapter.serverUrl).toBeUndefined();
     expect(adapter.apiKey).toBeUndefined();
@@ -92,6 +95,7 @@ describe("iMessageAdapter", () => {
   it("should store local mode config with optional serverUrl", () => {
     const adapter = new iMessageAdapter({
       local: true,
+      logger: mockLogger,
       serverUrl: "http://localhost:1234",
     });
     expect(adapter.local).toBe(true);
@@ -101,6 +105,7 @@ describe("iMessageAdapter", () => {
   it("should store remote mode config", () => {
     const adapter = new iMessageAdapter({
       local: false,
+      logger: mockLogger,
       serverUrl: "https://example.com",
       apiKey: "test-key",
     });
@@ -111,7 +116,7 @@ describe("iMessageAdapter", () => {
 
   it("should create IMessageSDK for local mode", async () => {
     const { IMessageSDK } = await import("@photon-ai/imessage-kit");
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     expect(IMessageSDK).toHaveBeenCalled();
     expect(adapter.sdk).toBeDefined();
   });
@@ -122,6 +127,7 @@ describe("iMessageAdapter", () => {
     );
     const adapter = new iMessageAdapter({
       local: false,
+      logger: mockLogger,
       serverUrl: "https://example.com",
       apiKey: "test-key",
     });
@@ -136,9 +142,9 @@ describe("iMessageAdapter", () => {
     const originalPlatform = process.platform;
     Object.defineProperty(process, "platform", { value: "linux" });
     try {
-      expect(() => new iMessageAdapter({ local: true })).toThrow(
-        "iMessage adapter local mode requires macOS"
-      );
+      expect(
+        () => new iMessageAdapter({ local: true, logger: mockLogger })
+      ).toThrow("iMessage adapter local mode requires macOS");
     } finally {
       Object.defineProperty(process, "platform", { value: originalPlatform });
     }
@@ -150,6 +156,7 @@ describe("iMessageAdapter", () => {
     try {
       const adapter = new iMessageAdapter({
         local: false,
+        logger: mockLogger,
         serverUrl: "https://example.com",
         apiKey: "test-key",
       });
@@ -162,15 +169,17 @@ describe("iMessageAdapter", () => {
 
 describe("initialize", () => {
   it("should store chat instance and not throw", async () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     const mockChat = createMockChat();
     await adapter.initialize(mockChat as never);
-    expect(mockChat.getLogger).toHaveBeenCalledWith("imessage");
+    // Logger is set in constructor, not in initialize
+    expect(adapter.name).toBe("imessage");
   });
 
   it("should connect and wait for ready in remote mode", async () => {
     const adapter = new iMessageAdapter({
       local: false,
+      logger: mockLogger,
       serverUrl: "https://example.com",
       apiKey: "test-key",
     });
@@ -183,7 +192,7 @@ describe("initialize", () => {
 
 describe("encodeThreadId / decodeThreadId", () => {
   it("should encode thread ID", () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     const threadId = adapter.encodeThreadId({
       chatGuid: "iMessage;-;+1234567890",
     });
@@ -191,13 +200,13 @@ describe("encodeThreadId / decodeThreadId", () => {
   });
 
   it("should decode thread ID", () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     const result = adapter.decodeThreadId("imessage:iMessage;-;+1234567890");
     expect(result).toEqual({ chatGuid: "iMessage;-;+1234567890" });
   });
 
   it("should roundtrip encode/decode", () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     const original = { chatGuid: "iMessage;+;chat123456" };
     const encoded = adapter.encodeThreadId(original);
     const decoded = adapter.decodeThreadId(encoded);
@@ -205,10 +214,30 @@ describe("encodeThreadId / decodeThreadId", () => {
   });
 });
 
+describe("isDM", () => {
+  it("should return true for DM thread IDs (;-; pattern)", () => {
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
+    expect(adapter.isDM("imessage:iMessage;-;+1234567890")).toBe(true);
+  });
+
+  it("should return false for group thread IDs (;+; pattern)", () => {
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
+    expect(adapter.isDM("imessage:iMessage;+;chat493787071395575843")).toBe(
+      false
+    );
+  });
+
+  it("should return true for SMS DMs", () => {
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
+    expect(adapter.isDM("imessage:SMS;-;+1234567890")).toBe(true);
+  });
+});
+
 describe("handleWebhook", () => {
   it("should reject invalid gateway token", async () => {
     const adapter = new iMessageAdapter({
       local: false,
+      logger: mockLogger,
       serverUrl: "https://example.com",
       apiKey: "correct-key",
     });
@@ -232,7 +261,11 @@ describe("handleWebhook", () => {
   });
 
   it("should reject invalid JSON body", async () => {
-    const adapter = new iMessageAdapter({ local: true, apiKey: "key" });
+    const adapter = new iMessageAdapter({
+      local: true,
+      logger: mockLogger,
+      apiKey: "key",
+    });
     await adapter.initialize(createMockChat() as never);
 
     const request = new Request("https://example.com/webhook", {
@@ -249,7 +282,11 @@ describe("handleWebhook", () => {
 
   it("should process forwarded GATEWAY_NEW_MESSAGE event", async () => {
     const mockChat = createMockChat();
-    const adapter = new iMessageAdapter({ local: true, apiKey: "key" });
+    const adapter = new iMessageAdapter({
+      local: true,
+      logger: mockLogger,
+      apiKey: "key",
+    });
     await adapter.initialize(mockChat as never);
 
     const messageData: iMessageGatewayMessageData = {
@@ -297,7 +334,11 @@ describe("handleWebhook", () => {
 
   it("should set isMention to false for group chats", async () => {
     const mockChat = createMockChat();
-    const adapter = new iMessageAdapter({ local: true, apiKey: "key" });
+    const adapter = new iMessageAdapter({
+      local: true,
+      logger: mockLogger,
+      apiKey: "key",
+    });
     await adapter.initialize(mockChat as never);
 
     const messageData: iMessageGatewayMessageData = {
@@ -334,7 +375,11 @@ describe("handleWebhook", () => {
 
   it("should process native imessage-kit webhook payload", async () => {
     const mockChat = createMockChat();
-    const adapter = new iMessageAdapter({ local: true, apiKey: "key" });
+    const adapter = new iMessageAdapter({
+      local: true,
+      logger: mockLogger,
+      apiKey: "key",
+    });
     await adapter.initialize(mockChat as never);
 
     const nativePayload = {
@@ -387,7 +432,11 @@ describe("handleWebhook", () => {
   });
 
   it("should return 400 for unrecognized payload with gateway token", async () => {
-    const adapter = new iMessageAdapter({ local: true, apiKey: "key" });
+    const adapter = new iMessageAdapter({
+      local: true,
+      logger: mockLogger,
+      apiKey: "key",
+    });
     await adapter.initialize(createMockChat() as never);
 
     const request = new Request("https://example.com/webhook", {
@@ -405,7 +454,7 @@ describe("handleWebhook", () => {
   });
 
   it("should return 400 for requests without gateway token", async () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     await adapter.initialize(createMockChat() as never);
 
     const request = new Request("https://example.com/webhook", {
@@ -420,7 +469,7 @@ describe("handleWebhook", () => {
 
 describe("startGatewayListener", () => {
   it("should return 500 without chat instance", async () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     const response = await adapter.startGatewayListener({
       waitUntil: vi.fn(),
     });
@@ -430,7 +479,7 @@ describe("startGatewayListener", () => {
   });
 
   it("should return 500 without waitUntil", async () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     await adapter.initialize(createMockChat() as never);
 
     const response = await adapter.startGatewayListener({});
@@ -440,7 +489,7 @@ describe("startGatewayListener", () => {
   });
 
   it("should start listening and return success response", async () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     await adapter.initialize(createMockChat() as never);
 
     const waitUntil = vi.fn();
@@ -455,7 +504,7 @@ describe("startGatewayListener", () => {
   });
 
   it("should use abort signal to stop early", async () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     await adapter.initialize(createMockChat() as never);
 
     const controller = new AbortController();
@@ -477,7 +526,11 @@ describe("startGatewayListener", () => {
 
   it("should create a new SDK instance with webhook config in local mode", async () => {
     const { IMessageSDK } = await import("@photon-ai/imessage-kit");
-    const adapter = new iMessageAdapter({ local: true, apiKey: "my-key" });
+    const adapter = new iMessageAdapter({
+      local: true,
+      logger: mockLogger,
+      apiKey: "my-key",
+    });
     await adapter.initialize(createMockChat() as never);
 
     const callCountBefore = (IMessageSDK as ReturnType<typeof vi.fn>).mock.calls
@@ -523,7 +576,7 @@ describe("postMessage", () => {
   });
 
   it("should send via local SDK with DM chatGuid", async () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     await adapter.initialize(createMockChat() as never);
 
     mockSend.mockResolvedValue({
@@ -546,7 +599,7 @@ describe("postMessage", () => {
   });
 
   it("should send via local SDK with group chatGuid", async () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     await adapter.initialize(createMockChat() as never);
 
     mockSend.mockResolvedValue({
@@ -567,7 +620,7 @@ describe("postMessage", () => {
   });
 
   it("should fallback to generated ID when local SDK has no message guid", async () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     await adapter.initialize(createMockChat() as never);
 
     mockSend.mockResolvedValue({ sentAt: new Date() });
@@ -583,6 +636,7 @@ describe("postMessage", () => {
   it("should send via remote SDK", async () => {
     const adapter = new iMessageAdapter({
       local: false,
+      logger: mockLogger,
       serverUrl: "https://example.com",
       apiKey: "test-key",
     });
@@ -617,7 +671,7 @@ describe("editMessage", () => {
   });
 
   it("should throw NotImplementedError in local mode", async () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     await adapter.initialize(createMockChat() as never);
 
     await expect(
@@ -632,6 +686,7 @@ describe("editMessage", () => {
   it("should edit via remote SDK", async () => {
     const adapter = new iMessageAdapter({
       local: false,
+      logger: mockLogger,
       serverUrl: "https://example.com",
       apiKey: "test-key",
     });
@@ -670,7 +725,7 @@ describe("addReaction / removeReaction", () => {
   });
 
   it("should throw NotImplementedError in local mode for addReaction", async () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     await adapter.initialize(createMockChat() as never);
 
     await expect(
@@ -679,7 +734,7 @@ describe("addReaction / removeReaction", () => {
   });
 
   it("should throw NotImplementedError in local mode for removeReaction", async () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     await adapter.initialize(createMockChat() as never);
 
     await expect(
@@ -694,6 +749,7 @@ describe("addReaction / removeReaction", () => {
   it("should send tapback via remote SDK for addReaction", async () => {
     const adapter = new iMessageAdapter({
       local: false,
+      logger: mockLogger,
       serverUrl: "https://example.com",
       apiKey: "test-key",
     });
@@ -717,6 +773,7 @@ describe("addReaction / removeReaction", () => {
   it("should map thumbs_up to like tapback", async () => {
     const adapter = new iMessageAdapter({
       local: false,
+      logger: mockLogger,
       serverUrl: "https://example.com",
       apiKey: "test-key",
     });
@@ -740,6 +797,7 @@ describe("addReaction / removeReaction", () => {
   it("should send remove tapback with dash prefix for removeReaction", async () => {
     const adapter = new iMessageAdapter({
       local: false,
+      logger: mockLogger,
       serverUrl: "https://example.com",
       apiKey: "test-key",
     });
@@ -763,6 +821,7 @@ describe("addReaction / removeReaction", () => {
   it("should throw for unsupported emoji", async () => {
     const adapter = new iMessageAdapter({
       local: false,
+      logger: mockLogger,
       serverUrl: "https://example.com",
       apiKey: "test-key",
     });
@@ -781,7 +840,7 @@ describe("startTyping", () => {
   });
 
   it("should throw NotImplementedError in local mode", async () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     await adapter.initialize(createMockChat() as never);
 
     await expect(
@@ -793,6 +852,7 @@ describe("startTyping", () => {
     vi.useFakeTimers();
     const adapter = new iMessageAdapter({
       local: false,
+      logger: mockLogger,
       serverUrl: "https://example.com",
       apiKey: "test-key",
     });
@@ -819,7 +879,7 @@ describe("fetchThread", () => {
   });
 
   it("should throw NotImplementedError in local mode", async () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     await adapter.initialize(createMockChat() as never);
 
     await expect(
@@ -830,6 +890,7 @@ describe("fetchThread", () => {
   it("should fetch DM thread via remote SDK", async () => {
     const adapter = new iMessageAdapter({
       local: false,
+      logger: mockLogger,
       serverUrl: "https://example.com",
       apiKey: "test-key",
     });
@@ -858,6 +919,7 @@ describe("fetchThread", () => {
   it("should fetch group thread via remote SDK", async () => {
     const adapter = new iMessageAdapter({
       local: false,
+      logger: mockLogger,
       serverUrl: "https://example.com",
       apiKey: "test-key",
     });
@@ -885,7 +947,7 @@ describe("fetchThread", () => {
 
 describe("parseMessage", () => {
   it("should parse local imessage-kit Message when local is true", () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     adapter.initialize(createMockChat() as never);
 
     const localRaw = {
@@ -919,6 +981,7 @@ describe("parseMessage", () => {
   it("should parse remote advanced-imessage-kit MessageResponse when local is false", () => {
     const adapter = new iMessageAdapter({
       local: false,
+      logger: mockLogger,
       serverUrl: "https://example.com",
       apiKey: "test-key",
     });
@@ -958,7 +1021,7 @@ describe("parseMessage", () => {
   });
 
   it("should set isMention to false for group chats in local mode", () => {
-    const adapter = new iMessageAdapter({ local: true });
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
     adapter.initialize(createMockChat() as never);
 
     const localRaw = {
@@ -988,6 +1051,7 @@ describe("parseMessage", () => {
   it("should handle attachments from remote payload", () => {
     const adapter = new iMessageAdapter({
       local: false,
+      logger: mockLogger,
       serverUrl: "https://example.com",
       apiKey: "test-key",
     });
@@ -1065,13 +1129,22 @@ describe("createiMessageAdapter", () => {
     expect(adapter.apiKey).toBe("env-key");
   });
 
-  it("should throw when remote mode is missing serverUrl", () => {
+  it("should throw ValidationError when remote mode is missing serverUrl", () => {
+    expect(() => createiMessageAdapter({ local: false })).toThrow(
+      ValidationError
+    );
     expect(() => createiMessageAdapter({ local: false })).toThrow(
       "serverUrl is required when local is false"
     );
   });
 
-  it("should throw when remote mode is missing apiKey", () => {
+  it("should throw ValidationError when remote mode is missing apiKey", () => {
+    expect(() =>
+      createiMessageAdapter({
+        local: false,
+        serverUrl: "https://example.com",
+      })
+    ).toThrow(ValidationError);
     expect(() =>
       createiMessageAdapter({
         local: false,

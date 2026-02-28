@@ -316,6 +316,9 @@ importers:
 
   packages/adapter-imessage:
     dependencies:
+      '@chat-adapter/shared':
+        specifier: workspace:^
+        version: link:../adapter-shared
       '@photon-ai/advanced-imessage-kit':
         specifier: ^1.14.3
         version: 1.14.3(typescript@5.9.3)
