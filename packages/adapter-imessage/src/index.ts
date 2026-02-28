@@ -233,13 +233,19 @@ export class iMessageAdapter implements Adapter {
   }
 
   async fetchMessages(
-    _threadId: string,
-    _options?: FetchOptions
+    threadId: string,
+    options?: FetchOptions
   ): Promise<FetchResult> {
-    throw new NotImplementedError(
-      "fetchMessages is not implemented",
-      "fetchMessages"
-    );
+    const { chatGuid } = this.decodeThreadId(threadId);
+    const direction = options?.direction ?? "backward";
+    const limit = options?.limit ?? 50;
+    const cursor = options?.cursor;
+
+    if (this.local) {
+      return this.fetchMessagesLocal(chatGuid, direction, limit, cursor);
+    }
+
+    return this.fetchMessagesRemote(chatGuid, direction, limit, cursor);
   }
 
   async fetchThread(threadId: string): Promise<ThreadInfo> {
@@ -539,6 +545,103 @@ export class iMessageAdapter implements Adapter {
 
       this.logger.info("iMessage Gateway listener stopped");
     }
+  }
+
+  private async fetchMessagesLocal(
+    chatGuid: string,
+    direction: "forward" | "backward",
+    limit: number,
+    cursor?: string
+  ): Promise<FetchResult> {
+    const sdk = this.sdk as IMessageSDK;
+    const since =
+      direction === "forward" && cursor ? new Date(cursor) : undefined;
+    const result = await sdk.getMessages({
+      chatId: chatGuid,
+      limit: 1000,
+      since,
+    });
+
+    let messages = [...result.messages].sort(
+      (a, b) => a.date.getTime() - b.date.getTime()
+    );
+
+    if (direction === "backward" && cursor) {
+      const cursorTime = new Date(cursor).getTime();
+      messages = messages.filter((m) => m.date.getTime() < cursorTime);
+    }
+
+    const isBackward = direction === "backward";
+    const start = isBackward ? Math.max(0, messages.length - limit) : 0;
+    const selected = messages.slice(start, start + limit);
+    const hasMore = isBackward ? start > 0 : messages.length > limit;
+
+    const normalized = selected.map((m) =>
+      this.buildMessage(this.normalizeLocalMessage(m))
+    );
+
+    let nextCursor: string | undefined;
+    if (hasMore && selected.length > 0) {
+      nextCursor = isBackward
+        ? selected[0].date.toISOString()
+        : selected.at(-1)?.date.toISOString();
+    }
+
+    return { messages: normalized, nextCursor };
+  }
+
+  private async fetchMessagesRemote(
+    chatGuid: string,
+    direction: "forward" | "backward",
+    limit: number,
+    cursor?: string
+  ): Promise<FetchResult> {
+    const sdk = this.sdk as AdvancedIMessageKit;
+    const isBackward = direction === "backward";
+
+    const queryOptions: {
+      chatGuid: string;
+      limit: number;
+      sort: "ASC" | "DESC";
+      before?: number;
+      after?: number;
+      with?: string[];
+    } = {
+      chatGuid,
+      limit: limit + 1,
+      sort: isBackward ? "DESC" : "ASC",
+      with: ["chat", "handle", "attachment"],
+    };
+
+    if (cursor) {
+      const timestamp = Number(cursor);
+      if (isBackward) {
+        queryOptions.before = timestamp;
+      } else {
+        queryOptions.after = timestamp;
+      }
+    }
+
+    const results = await sdk.messages.getMessages(queryOptions);
+    const hasMore = results.length > limit;
+    const sliced = hasMore ? results.slice(0, limit) : results;
+
+    if (isBackward) {
+      sliced.reverse();
+    }
+
+    const normalized = sliced.map((m) =>
+      this.buildMessage(this.normalizeRemoteMessage(m))
+    );
+
+    let nextCursor: string | undefined;
+    if (hasMore && sliced.length > 0) {
+      nextCursor = isBackward
+        ? String(sliced[0].dateCreated)
+        : String(sliced.at(-1)?.dateCreated);
+    }
+
+    return { messages: normalized, nextCursor };
   }
 
   private normalizeLocalMessage(

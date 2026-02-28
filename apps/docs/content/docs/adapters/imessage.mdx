@@ -137,7 +137,7 @@ IMESSAGE_API_KEY=...                 # Required for remote mode
 | Ephemeral messages | No |
 | File uploads | No |
 | Typing indicator | Remote only |
-| Message history | No |
+| Message history | Yes |
 | Message editing | Remote only |
 
 ## Tapback reactions
@@ -155,7 +155,7 @@ iMessage uses tapbacks instead of emoji reactions. The adapter maps standard emo
 
 ## Limitations
 
-- **Local mode**: Only supports sending and receiving messages. Reactions, typing indicators, message editing, and thread fetching require remote mode.
+- **Local mode**: Only supports sending/receiving messages and message history. Reactions, typing indicators, message editing, and thread fetching require remote mode.
 - **Formatting**: iMessage is plain-text only. Markdown formatting (bold, italic, etc.) is stripped when sending messages, preserving only the text content.
 - **Platform**: Local mode requires macOS. Remote mode can run on any platform — [Photon](https://photon.codes) manages the iMessage infrastructure for you.
 - **Cards and modals**: iMessage has no support for structured card layouts or interactive modals.
