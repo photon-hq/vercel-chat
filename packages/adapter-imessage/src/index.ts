@@ -1,4 +1,7 @@
-import { ValidationError } from "@chat-adapter/shared";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { extractFiles, ValidationError } from "@chat-adapter/shared";
 import type { MessageResponse } from "@photon-ai/advanced-imessage-kit";
 import { AdvancedIMessageKit } from "@photon-ai/advanced-imessage-kit";
 import type { Message as IMessageLocalMessage } from "@photon-ai/imessage-kit";
@@ -10,6 +13,7 @@ import type {
   EmojiValue,
   FetchOptions,
   FetchResult,
+  FileUpload,
   FormattedContent,
   Logger,
   RawMessage,
@@ -164,32 +168,59 @@ export class iMessageAdapter implements Adapter {
   ): Promise<RawMessage> {
     const { chatGuid } = this.decodeThreadId(threadId);
     const text = this.formatConverter.renderPostable(message);
+    const files = extractFiles(message);
+    const tempFiles =
+      files.length > 0 ? await this.writeTempFiles(files) : null;
 
-    if (this.local) {
-      const sdk = this.sdk as IMessageSDK;
-      // sdk.send() expects the core identifier (phone/email/chatId), not the full GUID.
-      // chatGuid format: "iMessage;-;+1234567890" or "iMessage;+;chat123..."
-      // Extract last part after final semicolon.
-      const recipient = chatGuid.split(";").pop() ?? chatGuid;
-      const result = await sdk.send(recipient, text);
+    try {
+      if (this.local) {
+        const sdk = this.sdk as IMessageSDK;
+        // sdk.send() expects the core identifier (phone/email/chatId), not the full GUID.
+        // chatGuid format: "iMessage;-;+1234567890" or "iMessage;+;chat123..."
+        // Extract last part after final semicolon.
+        const recipient = chatGuid.split(";").pop() ?? chatGuid;
+        const content = tempFiles?.paths.length
+          ? { text: text || undefined, files: tempFiles.paths }
+          : text;
+        const result = await sdk.send(recipient, content);
+        return {
+          id: result.message?.guid ?? `local-${Date.now()}`,
+          threadId,
+          raw: result,
+        };
+      }
+
+      // Remote: sdk.messages.sendMessage() takes the full chatGuid directly
+      const sdk = this.sdk as AdvancedIMessageKit;
+      let result: MessageResponse | undefined;
+
+      if (text || !tempFiles) {
+        result = await sdk.messages.sendMessage({
+          chatGuid,
+          message: text,
+        });
+      }
+
+      if (tempFiles) {
+        for (const filePath of tempFiles.paths) {
+          const attachmentResult = await sdk.attachments.sendAttachment({
+            chatGuid,
+            filePath,
+          });
+          result ??= attachmentResult;
+        }
+      }
+
       return {
-        id: result.message?.guid ?? `local-${Date.now()}`,
+        id: result?.guid ?? `msg-${Date.now()}`,
         threadId,
         raw: result,
       };
+    } finally {
+      if (tempFiles) {
+        await rm(tempFiles.dir, { recursive: true }).catch(() => {});
+      }
     }
-
-    // Remote: sdk.messages.sendMessage() takes the full chatGuid directly
-    const sdk = this.sdk as AdvancedIMessageKit;
-    const result = await sdk.messages.sendMessage({
-      chatGuid,
-      message: text,
-    });
-    return {
-      id: result.guid,
-      threadId,
-      raw: result,
-    };
   }
 
   async editMessage(
@@ -545,6 +576,27 @@ export class iMessageAdapter implements Adapter {
 
       this.logger.info("iMessage Gateway listener stopped");
     }
+  }
+
+  private async writeTempFiles(
+    files: FileUpload[]
+  ): Promise<{ dir: string; paths: string[] }> {
+    const dir = await mkdtemp(join(tmpdir(), "imessage-"));
+    const paths: string[] = [];
+    for (const file of files) {
+      let buffer: Buffer;
+      if (Buffer.isBuffer(file.data)) {
+        buffer = file.data;
+      } else if (file.data instanceof Blob) {
+        buffer = Buffer.from(await file.data.arrayBuffer());
+      } else {
+        buffer = Buffer.from(file.data as ArrayBuffer);
+      }
+      const filePath = join(dir, file.filename);
+      await writeFile(filePath, buffer);
+      paths.push(filePath);
+    }
+    return { dir, paths };
   }
 
   private async fetchMessagesLocal(
