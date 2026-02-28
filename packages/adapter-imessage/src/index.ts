@@ -148,7 +148,7 @@ export class iMessageAdapter implements Adapter {
         const data = this.normalizeNativeWebhookMessage(
           obj as unknown as NativeWebhookPayload
         );
-        await this.handleGatewayMessage(data);
+        this.handleGatewayMessage(data, options);
         return new Response(JSON.stringify({ ok: true }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -814,10 +814,10 @@ export class iMessageAdapter implements Adapter {
     }
   }
 
-  private async handleForwardedGatewayEvent(
+  private handleForwardedGatewayEvent(
     event: iMessageForwardedEvent,
-    _options?: WebhookOptions
-  ): Promise<Response> {
+    options?: WebhookOptions
+  ): Response {
     this.logger.info("Processing forwarded Gateway event", {
       type: event.type,
       timestamp: event.timestamp,
@@ -825,8 +825,9 @@ export class iMessageAdapter implements Adapter {
 
     switch (event.type) {
       case "GATEWAY_NEW_MESSAGE":
-        await this.handleGatewayMessage(
-          event.data as iMessageGatewayMessageData
+        this.handleGatewayMessage(
+          event.data as iMessageGatewayMessageData,
+          options
         );
         break;
       default:
@@ -870,27 +871,16 @@ export class iMessageAdapter implements Adapter {
     });
   }
 
-  private async handleGatewayMessage(
-    data: iMessageGatewayMessageData
-  ): Promise<void> {
+  private handleGatewayMessage(
+    data: iMessageGatewayMessageData,
+    options?: WebhookOptions
+  ): void {
     if (!this.chat) {
       return;
     }
 
     const chatMessage = this.buildMessage(data);
-
-    try {
-      await this.chat.handleIncomingMessage(
-        this,
-        chatMessage.threadId,
-        chatMessage
-      );
-    } catch (error) {
-      this.logger.error("Error handling iMessage gateway message", {
-        error: String(error),
-        messageGuid: data.guid,
-      });
-    }
+    this.chat.processMessage(this, chatMessage.threadId, chatMessage, options);
   }
 
   private emojiToTapback(emoji: EmojiValue | string): string {
