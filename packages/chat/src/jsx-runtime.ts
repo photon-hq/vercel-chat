@@ -66,6 +66,8 @@ import {
   TextInput,
 } from "./modals";
 
+import { Poll, type PollElement } from "./polls";
+
 // Symbol to identify our JSX elements before they're processed
 const JSX_ELEMENT = Symbol.for("chat.jsx.element");
 
@@ -170,6 +172,13 @@ export interface SelectOptionProps {
   value: string;
 }
 
+/** Props for Poll component in JSX */
+export interface PollProps {
+  id: string;
+  question: string;
+  options: string[];
+}
+
 /** Union of all valid JSX props */
 export type CardJSXProps =
   | CardProps
@@ -184,7 +193,8 @@ export type CardJSXProps =
   | ModalProps
   | TextInputProps
   | SelectProps
-  | SelectOptionProps;
+  | SelectOptionProps
+  | PollProps;
 
 /** Component function type with proper overloads */
 type CardComponentFunction =
@@ -203,7 +213,8 @@ type CardComponentFunction =
   | typeof TextInput
   | typeof Select
   | typeof RadioSelect
-  | typeof SelectOption;
+  | typeof SelectOption
+  | typeof Poll;
 
 /**
  * Represents a JSX element from the chat JSX runtime.
@@ -286,6 +297,7 @@ type AnyCardElement =
   | ModalElement
   | ModalChild
   | SelectOptionElement
+  | PollElement
   | null;
 
 /**
@@ -382,6 +394,18 @@ function isSelectProps(props: CardJSXProps): props is SelectProps {
  */
 function isSelectOptionProps(props: CardJSXProps): props is SelectOptionProps {
   return "label" in props && "value" in props && !("id" in props);
+}
+
+/**
+ * Type guard to check if props match PollProps
+ */
+function isPollProps(props: CardJSXProps): props is PollProps {
+  return (
+    "id" in props &&
+    "question" in props &&
+    "options" in props &&
+    Array.isArray((props as PollProps).options)
+  );
 }
 
 /**
@@ -573,6 +597,17 @@ function resolveJSXElement(element: JSXElement): AnyCardElement {
     });
   }
 
+  if (type === Poll) {
+    if (!isPollProps(props)) {
+      throw new Error("Poll requires 'id', 'question', and 'options' props");
+    }
+    return Poll({
+      id: props.id,
+      question: props.question,
+      options: props.options,
+    });
+  }
+
   // Default: Card({ title, subtitle, imageUrl, children })
   const cardProps = isCardProps(props) ? props : {};
   return Card({
@@ -663,6 +698,36 @@ export function toCardElement(jsxElement: unknown): CardElement | null {
     (jsxElement as CardElement).type === "card"
   ) {
     return jsxElement as CardElement;
+  }
+
+  return null;
+}
+
+/**
+ * Convert a JSX element tree to a PollElement.
+ * Call this on the root JSX element to get a usable PollElement.
+ */
+export function toPollElement(jsxElement: unknown): PollElement | null {
+  if (isJSXElement(jsxElement)) {
+    const resolved = resolveJSXElement(jsxElement);
+    if (
+      resolved &&
+      typeof resolved === "object" &&
+      "type" in resolved &&
+      resolved.type === "poll"
+    ) {
+      return resolved as PollElement;
+    }
+  }
+
+  // Already a PollElement
+  if (
+    typeof jsxElement === "object" &&
+    jsxElement !== null &&
+    "type" in jsxElement &&
+    (jsxElement as PollElement).type === "poll"
+  ) {
+    return jsxElement as PollElement;
   }
 
   return null;

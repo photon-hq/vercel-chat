@@ -51,6 +51,16 @@ export const Section = _Section;
 export const toCardElement = _toCardElement;
 export const toModalElement = _toModalElement;
 
+// Poll builders
+import {
+  isPollElement as _isPollElement,
+  Poll as _Poll,
+} from "./polls";
+import { toPollElement as _toPollElement } from "./jsx-runtime";
+export const isPollElement = _isPollElement;
+export const Poll = _Poll;
+export const toPollElement = _toPollElement;
+
 // Modal builders
 import {
   fromReactModalElement as _fromReactModalElement,
@@ -112,6 +122,7 @@ export type {
   FieldProps,
   ImageProps,
   LinkButtonProps,
+  PollProps,
   TextProps,
 } from "./jsx-runtime";
 // Re-export mdast types for adapters
@@ -169,6 +180,9 @@ export {
   toPlainText,
   walkAst,
 } from "./markdown";
+// Poll types
+export type { PollElement, PollOptions } from "./polls";
+
 // Modal types
 export type {
   ModalChild,
@@ -230,6 +244,7 @@ export type {
   Postable,
   PostableAst,
   PostableCard,
+  PostablePoll,
   PostableMarkdown,
   PostableMessage,
   PostableRaw,

@@ -19,6 +19,7 @@ const {
   mockGatewayConnect,
   mockGatewayClose,
   mockGatewayOn,
+  mockPollCreate,
   MockAdvancedIMessageKit,
 } = vi.hoisted(() => {
   const mockStartWatching = vi.fn();
@@ -38,6 +39,7 @@ const {
   const mockGatewayConnect = vi.fn();
   const mockGatewayClose = vi.fn();
   const mockGatewayOn = vi.fn();
+  const mockPollCreate = vi.fn();
 
   const MockAdvancedIMessageKit = vi.fn(() => ({
     mocked: true,
@@ -65,6 +67,9 @@ const {
         startTyping: mockStartTyping,
         stopTyping: mockStopTyping,
       },
+      polls: {
+        create: mockPollCreate,
+      },
     }));
 
   return {
@@ -85,6 +90,7 @@ const {
     mockGatewayConnect,
     mockGatewayClose,
     mockGatewayOn,
+    mockPollCreate,
     MockAdvancedIMessageKit,
   };
 });
@@ -100,6 +106,8 @@ vi.mock("@photon-ai/imessage-kit", () => ({
 
 vi.mock("@photon-ai/advanced-imessage-kit", () => ({
   AdvancedIMessageKit: MockAdvancedIMessageKit,
+  isPollVote: vi.fn(() => false),
+  parsePollVotes: vi.fn(() => null),
 }));
 
 vi.mock("chat", async (importOriginal) => {
@@ -116,6 +124,7 @@ vi.mock("chat", async (importOriginal) => {
 });
 
 import { ValidationError } from "@chat-adapter/shared";
+import { NotImplementedError, Poll } from "chat";
 import { createiMessageAdapter, iMessageAdapter } from "./index";
 
 const mockLogger = {
@@ -387,16 +396,10 @@ describe("startGatewayListener", () => {
     // Track constructor calls before starting listener
     const callCountBefore = MockAdvancedIMessageKit.mock.calls.length;
 
-    await adapter.startGatewayListener(
-      { waitUntil },
-      60000,
-      controller.signal
-    );
+    await adapter.startGatewayListener({ waitUntil }, 60000, controller.signal);
 
     // A new AdvancedIMessageKit instance should have been created (not getInstance)
-    expect(MockAdvancedIMessageKit.mock.calls.length).toBe(
-      callCountBefore + 1
-    );
+    expect(MockAdvancedIMessageKit.mock.calls.length).toBe(callCountBefore + 1);
     expect(MockAdvancedIMessageKit).toHaveBeenLastCalledWith({
       serverUrl: "https://example.com",
       apiKey: "test-key",
@@ -417,7 +420,6 @@ describe("startGatewayListener", () => {
     expect(mockGatewayClose).toHaveBeenCalled();
     expect(mockClose).not.toHaveBeenCalled();
   });
-
 });
 
 describe("postMessage", () => {
@@ -1026,5 +1028,95 @@ describe("createiMessageAdapter", () => {
     expect(adapter.serverUrl).toBe("http://localhost:5678");
     expect(adapter.apiKey).toBe("local-key");
   });
+});
 
+describe("postMessage with polls", () => {
+  afterEach(() => {
+    mockPollCreate.mockReset();
+  });
+
+  it("should create poll via remote SDK", async () => {
+    const adapter = new iMessageAdapter({
+      local: false,
+      logger: mockLogger,
+      serverUrl: "https://example.com",
+      apiKey: "test-key",
+    });
+    await adapter.initialize(createMockChat() as never);
+
+    mockPollCreate.mockResolvedValue({
+      guid: "poll-msg-001",
+      text: "Poll created",
+    });
+
+    const poll = Poll({
+      id: "fav-color",
+      question: "Favorite color?",
+      options: ["Red", "Blue", "Green"],
+    });
+
+    const result = await adapter.postMessage(
+      "imessage:iMessage;-;+1234567890",
+      poll
+    );
+
+    expect(mockPollCreate).toHaveBeenCalledWith({
+      chatGuid: "iMessage;-;+1234567890",
+      title: "Favorite color?",
+      options: ["Red", "Blue", "Green"],
+    });
+    expect(result.id).toBe("poll-msg-001");
+    expect(result.threadId).toBe("imessage:iMessage;-;+1234567890");
+  });
+
+  it("should create poll via PostablePoll wrapper", async () => {
+    const adapter = new iMessageAdapter({
+      local: false,
+      logger: mockLogger,
+      serverUrl: "https://example.com",
+      apiKey: "test-key",
+    });
+    await adapter.initialize(createMockChat() as never);
+
+    mockPollCreate.mockResolvedValue({
+      guid: "poll-msg-002",
+      text: "Poll created",
+    });
+
+    const result = await adapter.postMessage(
+      "imessage:iMessage;-;+1234567890",
+      {
+        poll: Poll({
+          id: "yes-no",
+          question: "Do you agree?",
+          options: ["Yes", "No"],
+        }),
+      }
+    );
+
+    expect(mockPollCreate).toHaveBeenCalledWith({
+      chatGuid: "iMessage;-;+1234567890",
+      title: "Do you agree?",
+      options: ["Yes", "No"],
+    });
+    expect(result.id).toBe("poll-msg-002");
+  });
+
+  it("should throw NotImplementedError for polls in local mode", async () => {
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
+    await adapter.initialize(createMockChat() as never);
+
+    const poll = Poll({
+      id: "test",
+      question: "Q?",
+      options: ["A", "B"],
+    });
+
+    await expect(
+      adapter.postMessage("imessage:iMessage;-;+1234567890", poll)
+    ).rejects.toThrow(NotImplementedError);
+    await expect(
+      adapter.postMessage("imessage:iMessage;-;+1234567890", poll)
+    ).rejects.toThrow("Polls are not supported in local mode");
+  });
 });

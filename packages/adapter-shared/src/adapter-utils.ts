@@ -5,8 +5,14 @@
  * to reduce code duplication and ensure consistent behavior.
  */
 
-import type { AdapterPostableMessage, CardElement, FileUpload } from "chat";
-import { isCardElement } from "chat";
+import type {
+  AdapterPostableMessage,
+  CardElement,
+  FileUpload,
+  PollElement,
+  PostablePoll,
+} from "chat";
+import { isCardElement, isPollElement } from "chat";
 
 /**
  * Extract CardElement from an AdapterPostableMessage if present.
@@ -73,4 +79,40 @@ export function extractFiles(message: AdapterPostableMessage): FileUpload[] {
     return (message as { files?: FileUpload[] }).files ?? [];
   }
   return [];
+}
+
+/**
+ * Extract PollElement from an AdapterPostableMessage if present.
+ *
+ * Handles two cases:
+ * 1. The message IS a PollElement (type: "poll")
+ * 2. The message is a PostablePoll with a `poll` property
+ *
+ * @param message - The message to extract the poll from
+ * @returns The PollElement if found, null otherwise
+ *
+ * @example
+ * ```typescript
+ * // Case 1: Direct PollElement
+ * const poll = Poll({ id: "q1", question: "Favorite?", options: ["A", "B"] });
+ * extractPoll(poll); // returns the poll
+ *
+ * // Case 2: PostablePoll wrapper
+ * const message = { poll };
+ * extractPoll(message); // returns the poll
+ *
+ * // Case 3: Non-poll message
+ * extractPoll("Hello"); // returns null
+ * ```
+ */
+export function extractPoll(
+  message: AdapterPostableMessage
+): PollElement | null {
+  if (isPollElement(message)) {
+    return message;
+  }
+  if (typeof message === "object" && message !== null && "poll" in message) {
+    return (message as PostablePoll).poll;
+  }
+  return null;
 }

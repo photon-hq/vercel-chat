@@ -3,7 +3,12 @@ import type { Root } from "mdast";
 import { cardToFallbackText } from "./cards";
 import { ChannelImpl, deriveChannelId } from "./channel";
 import { getChatSingleton } from "./chat-singleton";
-import { type CardJSXElement, isJSX, toCardElement } from "./jsx-runtime";
+import {
+  type CardJSXElement,
+  isJSX,
+  toCardElement,
+  toPollElement,
+} from "./jsx-runtime";
 import {
   paragraph,
   parseMarkdown,
@@ -333,10 +338,18 @@ export class ThreadImpl<TState = Record<string, unknown>>
       | AdapterPostableMessage;
     if (isJSX(message)) {
       const card = toCardElement(message);
-      if (!card) {
-        throw new Error("Invalid JSX element: must be a Card element");
+      if (card) {
+        postable = card;
+      } else {
+        const poll = toPollElement(message);
+        if (poll) {
+          postable = poll;
+        } else {
+          throw new Error(
+            "Invalid JSX element: must be a Card or Poll element"
+          );
+        }
       }
-      postable = card;
     }
 
     const rawMessage = await this.adapter.postMessage(this.id, postable);
@@ -358,14 +371,21 @@ export class ThreadImpl<TState = Record<string, unknown>>
     const { fallbackToDM } = options;
     const userId = typeof user === "string" ? user : user.userId;
 
-    // Convert JSX to card if needed
+    // Convert JSX to card or poll if needed
     let postable: AdapterPostableMessage;
     if (isJSX(message)) {
       const card = toCardElement(message);
-      if (!card) {
-        throw new Error("Invalid JSX element: must be a Card element");
+      if (card) {
+        postable = card;
+      } else {
+        const poll = toPollElement(message);
+        if (!poll) {
+          throw new Error(
+            "Invalid JSX element: must be a Card or Poll element"
+          );
+        }
+        postable = poll;
       }
-      postable = card;
     } else {
       // Safe cast: if not JSX, it must be AdapterPostableMessage
       postable = message as AdapterPostableMessage;
@@ -646,17 +666,24 @@ export class ThreadImpl<TState = Record<string, unknown>>
       async edit(
         newContent: string | PostableMessage | CardJSXElement
       ): Promise<SentMessage> {
-        // Auto-convert JSX elements to CardElement
+        // Auto-convert JSX elements to CardElement or PollElement
         // edit doesn't support streaming, so use AdapterPostableMessage
         let postable: string | AdapterPostableMessage = newContent as
           | string
           | AdapterPostableMessage;
         if (isJSX(newContent)) {
           const card = toCardElement(newContent);
-          if (!card) {
-            throw new Error("Invalid JSX element: must be a Card element");
+          if (card) {
+            postable = card;
+          } else {
+            const poll = toPollElement(newContent);
+            if (!poll) {
+              throw new Error(
+                "Invalid JSX element: must be a Card or Poll element"
+              );
+            }
+            postable = poll;
           }
-          postable = card;
         }
         await adapter.editMessage(threadId, messageId, postable);
         return self.createSentMessage(messageId, postable);
@@ -707,10 +734,17 @@ export class ThreadImpl<TState = Record<string, unknown>>
           | AdapterPostableMessage;
         if (isJSX(newContent)) {
           const card = toCardElement(newContent);
-          if (!card) {
-            throw new Error("Invalid JSX element: must be a Card element");
+          if (card) {
+            postable = card;
+          } else {
+            const poll = toPollElement(newContent);
+            if (!poll) {
+              throw new Error(
+                "Invalid JSX element: must be a Card or Poll element"
+              );
+            }
+            postable = poll;
           }
-          postable = card;
         }
         await adapter.editMessage(threadId, messageId, postable);
         return self.createSentMessage(messageId, postable, threadId);

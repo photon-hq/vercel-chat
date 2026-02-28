@@ -6,7 +6,7 @@
  */
 
 // Adapter utilities
-export { extractCard, extractFiles } from "./adapter-utils";
+export { extractCard, extractFiles, extractPoll } from "./adapter-utils";
 
 // Buffer conversion utilities
 export {

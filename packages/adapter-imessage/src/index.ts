@@ -1,12 +1,21 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { extractFiles, ValidationError } from "@chat-adapter/shared";
+import {
+  extractFiles,
+  extractPoll,
+  ValidationError,
+} from "@chat-adapter/shared";
 import type { MessageResponse } from "@photon-ai/advanced-imessage-kit";
-import { AdvancedIMessageKit } from "@photon-ai/advanced-imessage-kit";
+import {
+  AdvancedIMessageKit,
+  isPollVote,
+  parsePollVotes,
+} from "@photon-ai/advanced-imessage-kit";
 import type { Message as IMessageLocalMessage } from "@photon-ai/imessage-kit";
 import { IMessageSDK } from "@photon-ai/imessage-kit";
 import type {
+  ActionEvent,
   Adapter,
   AdapterPostableMessage,
   ChatInstance,
@@ -65,6 +74,11 @@ export class iMessageAdapter implements Adapter {
   private chat: ChatInstance | null = null;
   private readonly logger: Logger;
   private readonly formatConverter = new iMessageFormatConverter();
+  /** Maps poll GUIDs from the remote API to poll metadata for action callbacks */
+  private readonly pollIdMap = new Map<
+    string,
+    { id: string; options: string[] }
+  >();
 
   constructor(config: iMessageAdapterConfig) {
     if (config.local && process.platform !== "darwin") {
@@ -108,10 +122,9 @@ export class iMessageAdapter implements Adapter {
     _request: Request,
     _options?: WebhookOptions
   ): Promise<Response> {
-    return new Response(
-      "Webhook not supported — use startGatewayListener()",
-      { status: 501 }
-    );
+    return new Response("Webhook not supported — use startGatewayListener()", {
+      status: 501,
+    });
   }
 
   async postMessage(
@@ -119,6 +132,29 @@ export class iMessageAdapter implements Adapter {
     message: AdapterPostableMessage
   ): Promise<RawMessage> {
     const { chatGuid } = this.decodeThreadId(threadId);
+
+    // Handle polls
+    const poll = extractPoll(message);
+    if (poll) {
+      if (this.local) {
+        throw new NotImplementedError(
+          "Polls are not supported in local mode",
+          "polls"
+        );
+      }
+      const sdk = this.sdk as AdvancedIMessageKit;
+      const result = await sdk.polls.create({
+        chatGuid,
+        title: poll.question,
+        options: poll.options,
+      });
+      this.pollIdMap.set(result.guid, {
+        id: poll.id,
+        options: poll.options,
+      });
+      return { id: result.guid, threadId, raw: result };
+    }
+
     const text = this.formatConverter.renderPostable(message);
     const files = extractFiles(message);
     const tempFiles =
@@ -440,6 +476,12 @@ export class iMessageAdapter implements Adapter {
               return;
             }
 
+            // Handle poll votes as action events
+            if (isPollVote(messageResponse)) {
+              this.handlePollVote(messageResponse);
+              return;
+            }
+
             const data = this.normalizeRemoteMessage(messageResponse);
             this.handleGatewayMessage(data);
           }
@@ -698,6 +740,67 @@ export class iMessageAdapter implements Adapter {
 
     const chatMessage = this.buildMessage(data);
     this.chat.processMessage(this, chatMessage.threadId, chatMessage, options);
+  }
+
+  private handlePollVote(
+    messageResponse: MessageResponse,
+    options?: WebhookOptions
+  ): void {
+    if (!this.chat) {
+      return;
+    }
+
+    // The associatedMessageGuid links the vote back to the original poll
+    const pollGuid = messageResponse.associatedMessageGuid;
+    if (!pollGuid) {
+      this.logger.debug("Poll vote missing associatedMessageGuid, skipping");
+      return;
+    }
+
+    const pollMeta = this.pollIdMap.get(pollGuid);
+    if (!pollMeta) {
+      this.logger.debug("Poll vote for unknown poll, skipping", { pollGuid });
+      return;
+    }
+
+    const parsed = parsePollVotes(messageResponse);
+    if (!parsed) {
+      this.logger.debug("Failed to parse poll votes", {
+        guid: messageResponse.guid,
+      });
+      return;
+    }
+
+    const chatGuid = messageResponse.chats?.[0]?.guid ?? "";
+    const threadId = this.encodeThreadId({ chatGuid });
+
+    for (const vote of parsed.votes) {
+      // Find the option index from the identifier pattern (e.g., "0", "1")
+      const optionIndex = Number.parseInt(vote.voteOptionIdentifier, 10);
+      const optionText = Number.isNaN(optionIndex)
+        ? vote.voteOptionIdentifier
+        : (pollMeta.options[optionIndex] ?? vote.voteOptionIdentifier);
+
+      const actionEvent: Omit<ActionEvent, "thread" | "openModal"> & {
+        adapter: iMessageAdapter;
+      } = {
+        actionId: pollMeta.id,
+        value: optionText,
+        user: {
+          userId: vote.participantHandle,
+          userName: vote.participantHandle,
+          fullName: vote.participantHandle,
+          isBot: false,
+          isMe: false,
+        },
+        messageId: messageResponse.guid,
+        threadId,
+        adapter: this,
+        raw: messageResponse,
+      };
+
+      this.chat.processAction(actionEvent, options);
+    }
   }
 
   private emojiToTapback(emoji: EmojiValue | string): string {

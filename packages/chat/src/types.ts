@@ -8,6 +8,7 @@ import type { CardJSXElement } from "./jsx-runtime";
 import type { Logger, LogLevel } from "./logger";
 import type { Message } from "./message";
 import type { ModalElement } from "./modals";
+import type { PollElement } from "./polls";
 
 // =============================================================================
 // Re-exports from extracted modules
@@ -987,7 +988,9 @@ export type AdapterPostableMessage =
   | PostableMarkdown
   | PostableAst
   | PostableCard
-  | CardElement;
+  | CardElement
+  | PostablePoll
+  | PollElement;
 
 /**
  * A message that can be posted to a thread.
@@ -998,6 +1001,8 @@ export type AdapterPostableMessage =
  * - `{ ast: Root }` - mdast AST, converted to platform format
  * - `{ card: CardElement }` - Rich card with buttons (Block Kit / Adaptive Cards / GChat Cards)
  * - `CardElement` - Direct card element
+ * - `{ poll: PollElement }` - Poll with voting options (iMessage native polls)
+ * - `PollElement` - Direct poll element
  * - `AsyncIterable<string>` - Streaming text (e.g., from AI SDK's textStream)
  */
 export type PostableMessage = AdapterPostableMessage | AsyncIterable<string>;
@@ -1036,6 +1041,11 @@ export interface PostableCard {
   fallbackText?: string;
   /** Files to upload */
   files?: FileUpload[];
+}
+
+export interface PostablePoll {
+  /** Poll element */
+  poll: PollElement;
 }
 
 export interface Attachment {
