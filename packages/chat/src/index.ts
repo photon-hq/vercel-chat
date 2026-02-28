@@ -51,12 +51,9 @@ export const Section = _Section;
 export const toCardElement = _toCardElement;
 export const toModalElement = _toModalElement;
 
-// Poll builders
-import {
-  isPollElement as _isPollElement,
-  Poll as _Poll,
-} from "./polls";
 import { toPollElement as _toPollElement } from "./jsx-runtime";
+// Poll builders
+import { isPollElement as _isPollElement, Poll as _Poll } from "./polls";
 export const isPollElement = _isPollElement;
 export const Poll = _Poll;
 export const toPollElement = _toPollElement;
@@ -180,9 +177,6 @@ export {
   toPlainText,
   walkAst,
 } from "./markdown";
-// Poll types
-export type { PollElement, PollOptions } from "./polls";
-
 // Modal types
 export type {
   ModalChild,
@@ -196,6 +190,8 @@ export type {
   TextInputElement,
   TextInputOptions,
 } from "./modals";
+// Poll types
+export type { PollElement, PollOptions } from "./polls";
 // Types
 export type {
   ActionEvent,
@@ -244,9 +240,9 @@ export type {
   Postable,
   PostableAst,
   PostableCard,
-  PostablePoll,
   PostableMarkdown,
   PostableMessage,
+  PostablePoll,
   PostableRaw,
   PostEphemeralOptions,
   RawMessage,

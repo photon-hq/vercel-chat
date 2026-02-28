@@ -32,13 +32,13 @@
 // ============================================================================
 
 export interface PollElement {
-  type: "poll";
   /** Unique identifier, used as actionId for vote callbacks */
   id: string;
-  /** The poll question */
-  question: string;
   /** List of options to vote on */
   options: string[];
+  /** The poll question */
+  question: string;
+  type: "poll";
 }
 
 // ============================================================================
@@ -61,10 +61,10 @@ export function isPollElement(value: unknown): value is PollElement {
 export interface PollOptions {
   /** Unique identifier, used as actionId for vote callbacks */
   id: string;
-  /** The poll question */
-  question: string;
   /** List of options to vote on */
   options: string[];
+  /** The poll question */
+  question: string;
 }
 
 export function Poll(options: PollOptions): PollElement {

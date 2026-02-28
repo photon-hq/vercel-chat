@@ -831,6 +831,26 @@ function extractMessageContent(message: AdapterPostableMessage): {
     };
   }
 
+  if ("poll" in message) {
+    // PostablePoll - generate fallback text from poll question
+    const fallbackText = message.poll.question;
+    return {
+      plainText: fallbackText,
+      formatted: root([paragraph([textNode(fallbackText)])]),
+      attachments: [],
+    };
+  }
+
+  if ("type" in message && message.type === "poll") {
+    // Direct PollElement
+    const fallbackText = message.question;
+    return {
+      plainText: fallbackText,
+      formatted: root([paragraph([textNode(fallbackText)])]),
+      attachments: [],
+    };
+  }
+
   // Should never reach here with proper typing
   throw new Error("Invalid PostableMessage format");
 }

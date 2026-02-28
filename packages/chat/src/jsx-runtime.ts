@@ -175,8 +175,8 @@ export interface SelectOptionProps {
 /** Props for Poll component in JSX */
 export interface PollProps {
   id: string;
-  question: string;
   options: string[];
+  question: string;
 }
 
 /** Union of all valid JSX props */
