@@ -28,7 +28,6 @@ import {
 } from "chat";
 import { iMessageFormatConverter } from "./markdown";
 import type {
-  iMessageForwardedEvent,
   iMessageGatewayMessageData,
   iMessageThreadId,
   NativeWebhookPayload,
@@ -36,8 +35,6 @@ import type {
 
 export { iMessageFormatConverter } from "./markdown";
 export type {
-  iMessageForwardedEvent,
-  iMessageGatewayEventType,
   iMessageGatewayMessageData,
   iMessageThreadId,
   NativeWebhookPayload,
@@ -116,50 +113,53 @@ export class iMessageAdapter implements Adapter {
     options?: WebhookOptions
   ): Promise<Response> {
     const gatewayToken = request.headers.get("x-imessage-gateway-token");
-    if (gatewayToken) {
-      if (this.apiKey && gatewayToken !== this.apiKey) {
-        this.logger.warn("Invalid gateway token");
-        return new Response("Invalid gateway token", { status: 401 });
-      }
-
-      const body = await request.text();
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(body);
-      } catch {
-        return new Response("Invalid JSON", { status: 400 });
-      }
-
-      // Check if this is a forwarded gateway event (has type/timestamp/data)
-      // or a native SDK webhook message (has guid/chatId directly)
-      const obj = parsed as Record<string, unknown>;
-      if (typeof obj.type === "string" && obj.type.startsWith("GATEWAY_")) {
-        return this.handleForwardedGatewayEvent(
-          parsed as iMessageForwardedEvent,
-          options
-        );
-      }
-
-      // Native imessage-kit webhook: the SDK POSTs the Message object directly
-      if (typeof obj.guid === "string" && typeof obj.chatId === "string") {
-        this.logger.info("Native iMessage SDK webhook received", {
-          guid: obj.guid as string,
-        });
-        const data = this.normalizeNativeWebhookMessage(
-          obj as unknown as NativeWebhookPayload
-        );
-        this.handleGatewayMessage(data, options);
-        return new Response(JSON.stringify({ ok: true }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      this.logger.warn("Unrecognized gateway webhook payload");
-      return new Response("Unrecognized payload", { status: 400 });
+    if (!gatewayToken) {
+      return new Response("Missing x-imessage-gateway-token header", {
+        status: 400,
+      });
     }
 
-    return new Response("Unknown request", { status: 400 });
+    if (!this.apiKey) {
+      this.logger.warn(
+        "Webhook received but apiKey is not configured — set IMESSAGE_API_KEY to accept webhooks"
+      );
+      return new Response(
+        "apiKey must be configured to accept webhooks",
+        { status: 401 }
+      );
+    }
+
+    if (gatewayToken !== this.apiKey) {
+      this.logger.warn("Invalid gateway token");
+      return new Response("Invalid gateway token", { status: 401 });
+    }
+
+    const body = await request.text();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return new Response("Invalid JSON", { status: 400 });
+    }
+
+    // Native imessage-kit webhook: the SDK POSTs the Message object directly
+    const obj = parsed as Record<string, unknown>;
+    if (typeof obj.guid === "string" && typeof obj.chatId === "string") {
+      this.logger.info("Native iMessage SDK webhook received", {
+        guid: obj.guid as string,
+      });
+      const data = this.normalizeNativeWebhookMessage(
+        obj as unknown as NativeWebhookPayload
+      );
+      this.handleGatewayMessage(data, options);
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    this.logger.warn("Unrecognized webhook payload");
+    return new Response("Unrecognized payload", { status: 400 });
   }
 
   async postMessage(
@@ -397,16 +397,16 @@ export class iMessageAdapter implements Adapter {
    * Start listening for incoming iMessage messages via the Gateway pattern.
    *
    * In local mode, uses IMessageSDK.startWatching() to poll for new messages.
-   * In remote mode, uses AdvancedIMessageKit socket.io connection.
+   * In remote mode, creates a dedicated AdvancedIMessageKit socket.io connection.
    *
-   * If webhookUrl is provided, events are forwarded to that URL for processing.
-   * Otherwise, events are processed directly (legacy/direct mode).
+   * Messages are processed directly via the Chat instance. For webhook-based
+   * message ingestion (e.g. imessage-kit running on a separate Mac), use
+   * handleWebhook() instead.
    */
   async startGatewayListener(
     options: WebhookOptions,
     durationMs = 180000,
-    abortSignal?: AbortSignal,
-    webhookUrl?: string
+    abortSignal?: AbortSignal
   ): Promise<Response> {
     if (!this.chat) {
       return new Response("Chat instance not initialized", { status: 500 });
@@ -419,14 +419,9 @@ export class iMessageAdapter implements Adapter {
     this.logger.info("Starting iMessage Gateway listener", {
       durationMs,
       mode: this.local ? "local" : "remote",
-      webhookUrl: webhookUrl ? "configured" : "not configured",
     });
 
-    const listenerPromise = this.runGatewayListener(
-      durationMs,
-      abortSignal,
-      webhookUrl
-    );
+    const listenerPromise = this.runGatewayListener(durationMs, abortSignal);
 
     options.waitUntil(listenerPromise);
 
@@ -446,54 +441,17 @@ export class iMessageAdapter implements Adapter {
 
   private async runGatewayListener(
     durationMs: number,
-    abortSignal?: AbortSignal,
-    webhookUrl?: string
+    abortSignal?: AbortSignal
   ): Promise<void> {
     let isShuttingDown = false;
 
-    const handleMessage = async (data: iMessageGatewayMessageData) => {
-      if (isShuttingDown) {
-        return;
-      }
-
-      if (webhookUrl) {
-        await this.forwardGatewayEvent(webhookUrl, {
-          type: "GATEWAY_NEW_MESSAGE",
-          timestamp: Date.now(),
-          data,
-        });
-      } else {
-        await this.handleGatewayMessage(data);
-      }
-    };
-
-    // Create dedicated SDK instances for the gateway listener so we don't
-    // close the shared singleton (this.sdk) when the listener stops.
-    let localWebhookSdk: IMessageSDK | null = null;
+    // Create a dedicated instance for remote mode so closing it doesn't
+    // affect the shared this.sdk singleton used by other methods.
     let remoteGatewaySdk: AdvancedIMessageKit | null = null;
 
     try {
       if (this.local) {
-        let sdk: IMessageSDK;
-
-        if (webhookUrl) {
-          // Use imessage-kit's native webhook support: the SDK will
-          // POST new messages to the webhookUrl automatically.
-          localWebhookSdk = new IMessageSDK({
-            webhook: {
-              url: webhookUrl,
-              headers: {
-                "x-imessage-gateway-token": this.apiKey ?? "",
-              },
-              retries: 2,
-              backoffMs: 500,
-            },
-            watcher: { excludeOwnMessages: true },
-          });
-          sdk = localWebhookSdk;
-        } else {
-          sdk = this.sdk as IMessageSDK;
-        }
+        const sdk = this.sdk as IMessageSDK;
 
         await sdk.startWatching({
           onMessage: async (message: IMessageLocalMessage) => {
@@ -504,13 +462,8 @@ export class iMessageAdapter implements Adapter {
               return;
             }
 
-            // In non-webhook mode, process directly.
-            // In webhook mode, the SDK's native webhook handles forwarding,
-            // but we still process directly here for the legacy path.
-            if (!webhookUrl) {
-              const data = this.normalizeLocalMessage(message);
-              await handleMessage(data);
-            }
+            const data = this.normalizeLocalMessage(message);
+            this.handleGatewayMessage(data);
           },
           onError: (error: Error) => {
             this.logger.error("iMessage local watcher error", {
@@ -519,8 +472,6 @@ export class iMessageAdapter implements Adapter {
           },
         });
       } else {
-        // Create a dedicated instance for this listener (not the singleton)
-        // so closing it doesn't affect the shared this.sdk used by other methods.
         remoteGatewaySdk = new AdvancedIMessageKit({
           serverUrl: this.serverUrl,
           apiKey: this.apiKey,
@@ -538,7 +489,7 @@ export class iMessageAdapter implements Adapter {
             }
 
             const data = this.normalizeRemoteMessage(messageResponse);
-            await handleMessage(data);
+            this.handleGatewayMessage(data);
           }
         );
       }
@@ -578,12 +529,7 @@ export class iMessageAdapter implements Adapter {
       isShuttingDown = true;
 
       if (this.local) {
-        if (localWebhookSdk) {
-          localWebhookSdk.stopWatching();
-          await localWebhookSdk.close();
-        } else {
-          (this.sdk as IMessageSDK).stopWatching();
-        }
+        (this.sdk as IMessageSDK).stopWatching();
       } else if (remoteGatewaySdk) {
         await remoteGatewaySdk.close();
       }
@@ -782,73 +728,6 @@ export class iMessageAdapter implements Adapter {
       source: "local",
       text: payload.text,
     };
-  }
-
-  private async forwardGatewayEvent(
-    webhookUrl: string,
-    event: iMessageForwardedEvent
-  ): Promise<void> {
-    try {
-      this.logger.debug("Forwarding iMessage Gateway event to webhook", {
-        type: event.type,
-        webhookUrl,
-      });
-
-      const response = await fetch(webhookUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-imessage-gateway-token": this.apiKey ?? "",
-        },
-        body: JSON.stringify(event),
-      });
-
-      if (response.ok) {
-        this.logger.debug("Gateway event forwarded successfully", {
-          type: event.type,
-        });
-      } else {
-        const errorText = await response.text();
-        this.logger.error("Failed to forward Gateway event", {
-          type: event.type,
-          status: response.status,
-          error: errorText,
-        });
-      }
-    } catch (error) {
-      this.logger.error("Error forwarding Gateway event", {
-        type: event.type,
-        error: String(error),
-      });
-    }
-  }
-
-  private handleForwardedGatewayEvent(
-    event: iMessageForwardedEvent,
-    options?: WebhookOptions
-  ): Response {
-    this.logger.info("Processing forwarded Gateway event", {
-      type: event.type,
-      timestamp: event.timestamp,
-    });
-
-    switch (event.type) {
-      case "GATEWAY_NEW_MESSAGE":
-        this.handleGatewayMessage(
-          event.data as iMessageGatewayMessageData,
-          options
-        );
-        break;
-      default:
-        this.logger.debug("Forwarded Gateway event (no handler)", {
-          type: event.type,
-        });
-    }
-
-    return new Response(JSON.stringify({ ok: true }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
   }
 
   private buildMessage(data: iMessageGatewayMessageData): Message {

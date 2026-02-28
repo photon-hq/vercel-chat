@@ -117,7 +117,6 @@ vi.mock("chat", async (importOriginal) => {
 
 import { ValidationError } from "@chat-adapter/shared";
 import { createiMessageAdapter, iMessageAdapter } from "./index";
-import type { iMessageGatewayMessageData } from "./types";
 
 const mockLogger = {
   info: vi.fn(),
@@ -295,6 +294,43 @@ describe("isDM", () => {
 });
 
 describe("handleWebhook", () => {
+  it("should return 400 for requests without gateway token header", async () => {
+    const adapter = new iMessageAdapter({
+      local: true,
+      logger: mockLogger,
+      apiKey: "key",
+    });
+    await adapter.initialize(createMockChat() as never);
+
+    const request = new Request("https://example.com/webhook", {
+      method: "POST",
+      body: "{}",
+    });
+
+    const response = await adapter.handleWebhook(request);
+    expect(response.status).toBe(400);
+    const text = await response.text();
+    expect(text).toBe("Missing x-imessage-gateway-token header");
+  });
+
+  it("should return 401 when apiKey is not configured", async () => {
+    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
+    await adapter.initialize(createMockChat() as never);
+
+    const request = new Request("https://example.com/webhook", {
+      method: "POST",
+      headers: {
+        "x-imessage-gateway-token": "some-token",
+      },
+      body: JSON.stringify({ guid: "msg-1", chatId: "iMessage;-;+1" }),
+    });
+
+    const response = await adapter.handleWebhook(request);
+    expect(response.status).toBe(401);
+    const text = await response.text();
+    expect(text).toBe("apiKey must be configured to accept webhooks");
+  });
+
   it("should reject invalid gateway token", async () => {
     const adapter = new iMessageAdapter({
       local: false,
@@ -310,11 +346,7 @@ describe("handleWebhook", () => {
         "Content-Type": "application/json",
         "x-imessage-gateway-token": "wrong-key",
       },
-      body: JSON.stringify({
-        type: "GATEWAY_NEW_MESSAGE",
-        timestamp: 0,
-        data: {},
-      }),
+      body: JSON.stringify({ guid: "msg-1", chatId: "iMessage;-;+1" }),
     });
 
     const response = await adapter.handleWebhook(request);
@@ -339,99 +371,6 @@ describe("handleWebhook", () => {
 
     const response = await adapter.handleWebhook(request);
     expect(response.status).toBe(400);
-  });
-
-  it("should process forwarded GATEWAY_NEW_MESSAGE event", async () => {
-    const mockChat = createMockChat();
-    const adapter = new iMessageAdapter({
-      local: true,
-      logger: mockLogger,
-      apiKey: "key",
-    });
-    await adapter.initialize(mockChat as never);
-
-    const messageData: iMessageGatewayMessageData = {
-      guid: "msg-123",
-      text: "Hello!",
-      sender: "+1234567890",
-      senderName: "John",
-      chatId: "iMessage;-;+1234567890",
-      isGroupChat: false,
-      isFromMe: false,
-      date: new Date().toISOString(),
-      attachments: [],
-      source: "local",
-    };
-
-    const request = new Request("https://example.com/webhook", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-imessage-gateway-token": "key",
-      },
-      body: JSON.stringify({
-        type: "GATEWAY_NEW_MESSAGE",
-        timestamp: Date.now(),
-        data: messageData,
-      }),
-    });
-
-    const response = await adapter.handleWebhook(request);
-    expect(response.status).toBe(200);
-
-    const body = await response.json();
-    expect(body).toEqual({ ok: true });
-    expect(mockChat.handleIncomingMessage).toHaveBeenCalledOnce();
-
-    const [calledAdapter, calledThreadId, calledMessage] =
-      mockChat.handleIncomingMessage.mock.calls[0];
-    expect(calledAdapter).toBe(adapter);
-    expect(calledThreadId).toBe("imessage:iMessage;-;+1234567890");
-    expect(calledMessage.text).toBe("Hello!");
-    expect(calledMessage.author.userId).toBe("+1234567890");
-    expect(calledMessage.author.userName).toBe("John");
-    expect(calledMessage.isMention).toBe(true);
-  });
-
-  it("should set isMention to false for group chats", async () => {
-    const mockChat = createMockChat();
-    const adapter = new iMessageAdapter({
-      local: true,
-      logger: mockLogger,
-      apiKey: "key",
-    });
-    await adapter.initialize(mockChat as never);
-
-    const messageData: iMessageGatewayMessageData = {
-      guid: "msg-456",
-      text: "Group hello",
-      sender: "+1234567890",
-      senderName: null,
-      chatId: "iMessage;+;chat789",
-      isGroupChat: true,
-      isFromMe: false,
-      date: new Date().toISOString(),
-      attachments: [],
-      source: "local",
-    };
-
-    const request = new Request("https://example.com/webhook", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-imessage-gateway-token": "key",
-      },
-      body: JSON.stringify({
-        type: "GATEWAY_NEW_MESSAGE",
-        timestamp: Date.now(),
-        data: messageData,
-      }),
-    });
-
-    await adapter.handleWebhook(request);
-    const [, , calledMessage] = mockChat.handleIncomingMessage.mock.calls[0];
-    expect(calledMessage.isMention).toBe(false);
-    expect(calledMessage.author.userName).toBe("+1234567890");
   });
 
   it("should process native imessage-kit webhook payload", async () => {
@@ -492,7 +431,7 @@ describe("handleWebhook", () => {
     expect(calledMessage.attachments[0].name).toBe("photo.jpg");
   });
 
-  it("should return 400 for unrecognized payload with gateway token", async () => {
+  it("should return 400 for unrecognized payload", async () => {
     const adapter = new iMessageAdapter({
       local: true,
       logger: mockLogger,
@@ -512,19 +451,6 @@ describe("handleWebhook", () => {
     expect(response.status).toBe(400);
     const text = await response.text();
     expect(text).toBe("Unrecognized payload");
-  });
-
-  it("should return 400 for requests without gateway token", async () => {
-    const adapter = new iMessageAdapter({ local: true, logger: mockLogger });
-    await adapter.initialize(createMockChat() as never);
-
-    const request = new Request("https://example.com/webhook", {
-      method: "POST",
-      body: "{}",
-    });
-
-    const response = await adapter.handleWebhook(request);
-    expect(response.status).toBe(400);
   });
 });
 
@@ -638,49 +564,6 @@ describe("startGatewayListener", () => {
     expect(mockClose).not.toHaveBeenCalled();
   });
 
-  it("should create a new SDK instance with webhook config in local mode", async () => {
-    const { IMessageSDK } = await import("@photon-ai/imessage-kit");
-    const adapter = new iMessageAdapter({
-      local: true,
-      logger: mockLogger,
-      apiKey: "my-key",
-    });
-    await adapter.initialize(createMockChat() as never);
-
-    const callCountBefore = (IMessageSDK as ReturnType<typeof vi.fn>).mock.calls
-      .length;
-
-    const controller = new AbortController();
-    const waitUntil = vi.fn();
-
-    await adapter.startGatewayListener(
-      { waitUntil },
-      60000,
-      controller.signal,
-      "https://example.com/webhook"
-    );
-
-    // A new IMessageSDK instance should have been created with webhook config
-    const callCountAfter = (IMessageSDK as ReturnType<typeof vi.fn>).mock.calls
-      .length;
-    expect(callCountAfter).toBe(callCountBefore + 1);
-    const lastCall = (IMessageSDK as ReturnType<typeof vi.fn>).mock.calls[
-      callCountAfter - 1
-    ];
-    expect(lastCall[0]).toEqual({
-      webhook: {
-        url: "https://example.com/webhook",
-        headers: { "x-imessage-gateway-token": "my-key" },
-        retries: 2,
-        backoffMs: 500,
-      },
-      watcher: { excludeOwnMessages: true },
-    });
-
-    controller.abort();
-    const listenerPromise = waitUntil.mock.calls[0][0] as Promise<void>;
-    await listenerPromise;
-  });
 });
 
 describe("postMessage", () => {

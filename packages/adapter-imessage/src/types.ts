@@ -4,19 +4,6 @@ export interface iMessageThreadId {
   chatGuid: string;
 }
 
-/** Gateway event types */
-export type iMessageGatewayEventType =
-  | "GATEWAY_NEW_MESSAGE"
-  | "GATEWAY_UPDATED_MESSAGE"
-  | `GATEWAY_${string}`;
-
-/** Forwarded event structure sent from the gateway listener to the webhook endpoint */
-export interface iMessageForwardedEvent {
-  data: unknown;
-  timestamp: number;
-  type: iMessageGatewayEventType;
-}
-
 /** Normalized message data from either local or remote SDK */
 export interface iMessageGatewayMessageData {
   /** Attachments */

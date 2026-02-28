@@ -77,35 +77,43 @@ Local mode requires the adapter to run directly on a macOS machine with iMessage
 
 1. Grant **Full Disk Access** to your terminal or application in **System Settings → Privacy & Security → Full Disk Access**
 2. Ensure iMessage is signed in and working on the Mac
-3. No additional environment variables are required — local mode is the default
+3. If using webhook mode, set `IMESSAGE_API_KEY` (see [Webhook](#webhook) below)
 
 ## Receiving messages
 
-The adapter supports multiple ways to receive incoming messages:
+The adapter supports two ways to receive incoming messages:
 
 ### Gateway listener (recommended)
 
-Call `startGatewayListener()` to listen for new messages in real-time. In remote mode, this uses Socket.IO push events. In local mode, it polls the iMessage database.
-
-You can optionally provide a `webhookUrl` to forward events to your webhook endpoint:
+Call `startGatewayListener()` to listen for new messages in real-time. The adapter connects directly to the message source — in remote mode via Socket.IO push events, in local mode by polling the iMessage database.
 
 ```typescript title="lib/bot.ts"
 const adapter = bot.getAdapter("imessage");
 await adapter.startGatewayListener({
   handleMessage: async (message) => {
-    // Process message directly (no webhook needed)
+    // Process each incoming message
   },
 });
 ```
 
 ### Webhook
 
-The adapter handles two webhook formats:
+For setups where `imessage-kit` runs on a separate Mac, you can configure it to POST messages to your bot's webhook endpoint. The adapter's `handleWebhook()` method processes these native `imessage-kit` payloads.
 
-- **Forwarded gateway events**: Messages forwarded from `startGatewayListener()` with a `GATEWAY_` type prefix, authenticated via the `x-imessage-gateway-token` header
-- **iMessage Kit webhooks** (local mode only): Messages posted directly by `imessage-kit` when configured with a `webhook` URL
+**Requirements:**
 
-Both formats are automatically detected and handled by `handleWebhook()`.
+- `apiKey` must be configured on the adapter (via `IMESSAGE_API_KEY` env var or the `apiKey` config option)
+- The `imessage-kit` instance must send the `x-imessage-gateway-token` header with the same API key value
+
+```typescript title="lib/bot.ts"
+// In your webhook route handler (e.g., Next.js API route)
+const adapter = bot.getAdapter("imessage");
+const response = await adapter.handleWebhook(request, {
+  handleMessage: async (message) => {
+    // Process each incoming message
+  },
+});
+```
 
 ## Configuration
 
@@ -113,7 +121,7 @@ Both formats are automatically detected and handled by `handleWebhook()`.
 |--------|----------|-------------|
 | `local` | No | `true` for local mode, `false` for remote. Auto-detected from `IMESSAGE_LOCAL` (default: `true`) |
 | `serverUrl` | Remote only | URL of the remote iMessage server. Auto-detected from `IMESSAGE_SERVER_URL` |
-| `apiKey` | Remote only | API key for authentication. Auto-detected from `IMESSAGE_API_KEY` |
+| `apiKey` | Remote mode; webhook mode | API key for authentication. Also used to verify `x-imessage-gateway-token` in webhook mode. Auto-detected from `IMESSAGE_API_KEY` |
 | `logger` | No | Logger instance (defaults to `ConsoleLogger("info")`) |
 
 ## Environment variables
@@ -121,7 +129,7 @@ Both formats are automatically detected and handled by `handleWebhook()`.
 ```bash title=".env.local"
 IMESSAGE_LOCAL=false                 # Set to "false" for remote mode (default: true)
 IMESSAGE_SERVER_URL=https://...       # Required for remote mode
-IMESSAGE_API_KEY=...                 # Required for remote mode
+IMESSAGE_API_KEY=...                 # Required for remote mode and webhook mode
 ```
 
 ## Features
