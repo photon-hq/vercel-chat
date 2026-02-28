@@ -18,6 +18,7 @@ vi.mock("@photon-ai/imessage-kit", () => ({
 const mockConnect = vi.fn();
 const mockClose = vi.fn();
 const mockOn = vi.fn();
+const mockOnce = vi.fn((_event: string, cb: () => void) => cb());
 const mockSendMessage = vi.fn();
 
 vi.mock("@photon-ai/advanced-imessage-kit", () => ({
@@ -27,6 +28,7 @@ vi.mock("@photon-ai/advanced-imessage-kit", () => ({
       connect: mockConnect,
       close: mockClose,
       on: mockOn,
+      once: mockOnce,
       messages: { sendMessage: mockSendMessage },
     })),
   },
@@ -150,6 +152,18 @@ describe("initialize", () => {
     const mockChat = createMockChat();
     await adapter.initialize(mockChat as never);
     expect(mockChat.getLogger).toHaveBeenCalledWith("imessage");
+  });
+
+  it("should connect and wait for ready in remote mode", async () => {
+    const adapter = new iMessageAdapter({
+      local: false,
+      serverUrl: "https://example.com",
+      apiKey: "test-key",
+    });
+    const mockChat = createMockChat();
+    await adapter.initialize(mockChat as never);
+    expect(mockConnect).toHaveBeenCalled();
+    expect(mockOnce).toHaveBeenCalledWith("ready", expect.any(Function));
   });
 });
 

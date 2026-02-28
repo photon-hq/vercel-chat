@@ -89,6 +89,12 @@ export class iMessageAdapter implements Adapter {
       local: this.local,
       serverUrl: this.serverUrl ? "configured" : "not configured",
     });
+
+    if (!this.local) {
+      const sdk = this.sdk as AdvancedIMessageKit;
+      await sdk.connect();
+      await new Promise<void>((resolve) => sdk.once("ready", resolve));
+    }
   }
 
   async handleWebhook(
