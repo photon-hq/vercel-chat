@@ -22,6 +22,7 @@ const mockOnce = vi.fn((_event: string, cb: () => void) => cb());
 const mockSendMessage = vi.fn();
 const mockEditMessage = vi.fn();
 const mockGetChat = vi.fn();
+const mockSendReaction = vi.fn();
 
 vi.mock("@photon-ai/advanced-imessage-kit", () => ({
   AdvancedIMessageKit: {
@@ -31,7 +32,11 @@ vi.mock("@photon-ai/advanced-imessage-kit", () => ({
       close: mockClose,
       on: mockOn,
       once: mockOnce,
-      messages: { sendMessage: mockSendMessage, editMessage: mockEditMessage },
+      messages: {
+        sendMessage: mockSendMessage,
+        editMessage: mockEditMessage,
+        sendReaction: mockSendReaction,
+      },
       chats: { getChat: mockGetChat },
     })),
   },
@@ -650,6 +655,116 @@ describe("editMessage", () => {
       text: "Updated text",
       dateEdited: 1234567890,
     });
+  });
+});
+
+describe("addReaction / removeReaction", () => {
+  afterEach(() => {
+    mockSendReaction.mockReset();
+  });
+
+  it("should throw NotImplementedError in local mode for addReaction", async () => {
+    const adapter = new iMessageAdapter({ local: true });
+    await adapter.initialize(createMockChat() as never);
+
+    await expect(
+      adapter.addReaction("imessage:iMessage;-;+1234567890", "msg-001", "heart")
+    ).rejects.toThrow("addReaction is not supported in local mode");
+  });
+
+  it("should throw NotImplementedError in local mode for removeReaction", async () => {
+    const adapter = new iMessageAdapter({ local: true });
+    await adapter.initialize(createMockChat() as never);
+
+    await expect(
+      adapter.removeReaction(
+        "imessage:iMessage;-;+1234567890",
+        "msg-001",
+        "heart"
+      )
+    ).rejects.toThrow("removeReaction is not supported in local mode");
+  });
+
+  it("should send tapback via remote SDK for addReaction", async () => {
+    const adapter = new iMessageAdapter({
+      local: false,
+      serverUrl: "https://example.com",
+      apiKey: "test-key",
+    });
+    await adapter.initialize(createMockChat() as never);
+
+    mockSendReaction.mockResolvedValue({ guid: "reaction-001" });
+
+    await adapter.addReaction(
+      "imessage:iMessage;-;+1234567890",
+      "msg-001",
+      "heart"
+    );
+
+    expect(mockSendReaction).toHaveBeenCalledWith({
+      chatGuid: "iMessage;-;+1234567890",
+      messageGuid: "msg-001",
+      reaction: "love",
+    });
+  });
+
+  it("should map thumbs_up to like tapback", async () => {
+    const adapter = new iMessageAdapter({
+      local: false,
+      serverUrl: "https://example.com",
+      apiKey: "test-key",
+    });
+    await adapter.initialize(createMockChat() as never);
+
+    mockSendReaction.mockResolvedValue({ guid: "reaction-002" });
+
+    await adapter.addReaction(
+      "imessage:iMessage;-;+1234567890",
+      "msg-001",
+      "thumbs_up"
+    );
+
+    expect(mockSendReaction).toHaveBeenCalledWith({
+      chatGuid: "iMessage;-;+1234567890",
+      messageGuid: "msg-001",
+      reaction: "like",
+    });
+  });
+
+  it("should send remove tapback with dash prefix for removeReaction", async () => {
+    const adapter = new iMessageAdapter({
+      local: false,
+      serverUrl: "https://example.com",
+      apiKey: "test-key",
+    });
+    await adapter.initialize(createMockChat() as never);
+
+    mockSendReaction.mockResolvedValue({ guid: "reaction-003" });
+
+    await adapter.removeReaction(
+      "imessage:iMessage;-;+1234567890",
+      "msg-001",
+      "laugh"
+    );
+
+    expect(mockSendReaction).toHaveBeenCalledWith({
+      chatGuid: "iMessage;-;+1234567890",
+      messageGuid: "msg-001",
+      reaction: "-laugh",
+    });
+  });
+
+  it("should throw for unsupported emoji", async () => {
+    const adapter = new iMessageAdapter({
+      local: false,
+      serverUrl: "https://example.com",
+      apiKey: "test-key",
+    });
+    await adapter.initialize(createMockChat() as never);
+
+    await expect(
+      adapter.addReaction("imessage:iMessage;-;+1234567890", "msg-001", "fire")
+    ).rejects.toThrow('Unsupported iMessage tapback: "fire"');
   });
 });
 

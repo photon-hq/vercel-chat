@@ -261,25 +261,47 @@ export class iMessageAdapter implements Adapter {
   }
 
   async addReaction(
-    _threadId: string,
-    _messageId: string,
-    _emoji: EmojiValue | string
+    threadId: string,
+    messageId: string,
+    emoji: EmojiValue | string
   ): Promise<void> {
-    throw new NotImplementedError(
-      "addReaction is not implemented",
-      "addReaction"
-    );
+    if (this.local) {
+      throw new NotImplementedError(
+        "addReaction is not supported in local mode",
+        "addReaction"
+      );
+    }
+
+    const tapback = this.emojiToTapback(emoji);
+    const { chatGuid } = this.decodeThreadId(threadId);
+    const sdk = this.sdk as AdvancedIMessageKit;
+    await sdk.messages.sendReaction({
+      chatGuid,
+      messageGuid: messageId,
+      reaction: tapback,
+    });
   }
 
   async removeReaction(
-    _threadId: string,
-    _messageId: string,
-    _emoji: EmojiValue | string
+    threadId: string,
+    messageId: string,
+    emoji: EmojiValue | string
   ): Promise<void> {
-    throw new NotImplementedError(
-      "removeReaction is not implemented",
-      "removeReaction"
-    );
+    if (this.local) {
+      throw new NotImplementedError(
+        "removeReaction is not supported in local mode",
+        "removeReaction"
+      );
+    }
+
+    const tapback = this.emojiToTapback(emoji);
+    const { chatGuid } = this.decodeThreadId(threadId);
+    const sdk = this.sdk as AdvancedIMessageKit;
+    await sdk.messages.sendReaction({
+      chatGuid,
+      messageGuid: messageId,
+      reaction: `-${tapback}`,
+    });
   }
 
   async startTyping(_threadId: string, _status?: string): Promise<void> {
@@ -685,6 +707,29 @@ export class iMessageAdapter implements Adapter {
         messageGuid: data.guid,
       });
     }
+  }
+
+  private emojiToTapback(emoji: EmojiValue | string): string {
+    const name = typeof emoji === "string" ? emoji : emoji.name;
+    const tapbackMap: Record<string, string> = {
+      heart: "love",
+      love: "love",
+      thumbs_up: "like",
+      like: "like",
+      thumbs_down: "dislike",
+      dislike: "dislike",
+      laugh: "laugh",
+      emphasize: "emphasize",
+      exclamation: "emphasize",
+      question: "question",
+    };
+    const tapback = tapbackMap[name];
+    if (!tapback) {
+      throw new Error(
+        `Unsupported iMessage tapback: "${name}". Supported: heart, thumbs_up, thumbs_down, laugh, emphasize, question`
+      );
+    }
+    return tapback;
   }
 
   private getAttachmentType(
