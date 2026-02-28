@@ -183,14 +183,29 @@ export class iMessageAdapter implements Adapter {
   }
 
   async editMessage(
-    _threadId: string,
-    _messageId: string,
-    _message: AdapterPostableMessage
+    threadId: string,
+    messageId: string,
+    message: AdapterPostableMessage
   ): Promise<RawMessage> {
-    throw new NotImplementedError(
-      "editMessage is not implemented",
-      "editMessage"
-    );
+    if (this.local) {
+      throw new NotImplementedError(
+        "editMessage is not supported in local mode",
+        "editMessage"
+      );
+    }
+
+    const text = typeof message === "string" ? message : String(message);
+    const sdk = this.sdk as AdvancedIMessageKit;
+    const result = await sdk.messages.editMessage({
+      messageGuid: messageId,
+      editedMessage: text,
+      backwardsCompatibilityMessage: text,
+    });
+    return {
+      id: result.guid,
+      threadId,
+      raw: result,
+    };
   }
 
   async deleteMessage(_threadId: string, _messageId: string): Promise<void> {

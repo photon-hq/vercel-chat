@@ -20,6 +20,7 @@ const mockClose = vi.fn();
 const mockOn = vi.fn();
 const mockOnce = vi.fn((_event: string, cb: () => void) => cb());
 const mockSendMessage = vi.fn();
+const mockEditMessage = vi.fn();
 
 vi.mock("@photon-ai/advanced-imessage-kit", () => ({
   AdvancedIMessageKit: {
@@ -29,7 +30,7 @@ vi.mock("@photon-ai/advanced-imessage-kit", () => ({
       close: mockClose,
       on: mockOn,
       once: mockOnce,
-      messages: { sendMessage: mockSendMessage },
+      messages: { sendMessage: mockSendMessage, editMessage: mockEditMessage },
     })),
   },
 }));
@@ -593,6 +594,59 @@ describe("postMessage", () => {
     expect(result.raw).toEqual({
       guid: "remote-msg-001",
       text: "Hello!",
+    });
+  });
+});
+
+describe("editMessage", () => {
+  afterEach(() => {
+    mockEditMessage.mockReset();
+  });
+
+  it("should throw NotImplementedError in local mode", async () => {
+    const adapter = new iMessageAdapter({ local: true });
+    await adapter.initialize(createMockChat() as never);
+
+    await expect(
+      adapter.editMessage(
+        "imessage:iMessage;-;+1234567890",
+        "msg-guid-001",
+        "Updated text"
+      )
+    ).rejects.toThrow("editMessage is not supported in local mode");
+  });
+
+  it("should edit via remote SDK", async () => {
+    const adapter = new iMessageAdapter({
+      local: false,
+      serverUrl: "https://example.com",
+      apiKey: "test-key",
+    });
+    await adapter.initialize(createMockChat() as never);
+
+    mockEditMessage.mockResolvedValue({
+      guid: "msg-guid-001",
+      text: "Updated text",
+      dateEdited: 1234567890,
+    });
+
+    const result = await adapter.editMessage(
+      "imessage:iMessage;-;+1234567890",
+      "msg-guid-001",
+      "Updated text"
+    );
+
+    expect(mockEditMessage).toHaveBeenCalledWith({
+      messageGuid: "msg-guid-001",
+      editedMessage: "Updated text",
+      backwardsCompatibilityMessage: "Updated text",
+    });
+    expect(result.id).toBe("msg-guid-001");
+    expect(result.threadId).toBe("imessage:iMessage;-;+1234567890");
+    expect(result.raw).toEqual({
+      guid: "msg-guid-001",
+      text: "Updated text",
+      dateEdited: 1234567890,
     });
   });
 });
