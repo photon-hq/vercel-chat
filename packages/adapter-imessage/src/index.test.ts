@@ -23,6 +23,8 @@ const mockSendMessage = vi.fn();
 const mockEditMessage = vi.fn();
 const mockGetChat = vi.fn();
 const mockSendReaction = vi.fn();
+const mockStartTyping = vi.fn();
+const mockStopTyping = vi.fn();
 
 vi.mock("@photon-ai/advanced-imessage-kit", () => ({
   AdvancedIMessageKit: {
@@ -37,7 +39,11 @@ vi.mock("@photon-ai/advanced-imessage-kit", () => ({
         editMessage: mockEditMessage,
         sendReaction: mockSendReaction,
       },
-      chats: { getChat: mockGetChat },
+      chats: {
+        getChat: mockGetChat,
+        startTyping: mockStartTyping,
+        stopTyping: mockStopTyping,
+      },
     })),
   },
 }));
@@ -765,6 +771,45 @@ describe("addReaction / removeReaction", () => {
     await expect(
       adapter.addReaction("imessage:iMessage;-;+1234567890", "msg-001", "fire")
     ).rejects.toThrow('Unsupported iMessage tapback: "fire"');
+  });
+});
+
+describe("startTyping", () => {
+  afterEach(() => {
+    mockStartTyping.mockReset();
+    mockStopTyping.mockReset();
+  });
+
+  it("should throw NotImplementedError in local mode", async () => {
+    const adapter = new iMessageAdapter({ local: true });
+    await adapter.initialize(createMockChat() as never);
+
+    await expect(
+      adapter.startTyping("imessage:iMessage;-;+1234567890")
+    ).rejects.toThrow("startTyping is not supported in local mode");
+  });
+
+  it("should call startTyping via remote SDK", async () => {
+    vi.useFakeTimers();
+    const adapter = new iMessageAdapter({
+      local: false,
+      serverUrl: "https://example.com",
+      apiKey: "test-key",
+    });
+    await adapter.initialize(createMockChat() as never);
+
+    mockStartTyping.mockResolvedValue(undefined);
+    mockStopTyping.mockResolvedValue(undefined);
+
+    await adapter.startTyping("imessage:iMessage;-;+1234567890");
+
+    expect(mockStartTyping).toHaveBeenCalledWith("iMessage;-;+1234567890");
+    expect(mockStopTyping).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(3000);
+
+    expect(mockStopTyping).toHaveBeenCalledWith("iMessage;-;+1234567890");
+    vi.useRealTimers();
   });
 });
 

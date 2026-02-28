@@ -304,11 +304,18 @@ export class iMessageAdapter implements Adapter {
     });
   }
 
-  async startTyping(_threadId: string, _status?: string): Promise<void> {
-    throw new NotImplementedError(
-      "startTyping is not implemented",
-      "startTyping"
-    );
+  async startTyping(threadId: string, _status?: string): Promise<void> {
+    if (this.local) {
+      throw new NotImplementedError(
+        "startTyping is not supported in local mode",
+        "startTyping"
+      );
+    }
+
+    const { chatGuid } = this.decodeThreadId(threadId);
+    const sdk = this.sdk as AdvancedIMessageKit;
+    await sdk.chats.startTyping(chatGuid);
+    setTimeout(() => sdk.chats.stopTyping(chatGuid), 3000);
   }
 
   renderFormatted(_content: FormattedContent): string {
