@@ -1,0 +1,105 @@
+---
+title: Polls
+description: Create native polls with voting and handle vote callbacks across platforms.
+type: guide
+prerequisites:
+  - /docs/usage
+related:
+  - /docs/actions
+  - /docs/cards
+---
+
+Polls let you create native voting experiences that render using each platform's built-in poll UI. Vote callbacks use the same `onAction` pattern as [card buttons](/docs/actions).
+
+## Setup
+
+Configure your `tsconfig.json` to use the Chat SDK JSX runtime:
+
+```json title="tsconfig.json"
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "chat"
+  }
+}
+```
+
+Or use a per-file pragma:
+
+```tsx title="lib/bot.tsx"
+/** @jsxImportSource chat */
+```
+
+## Basic poll
+
+```tsx title="lib/bot.tsx" lineNumbers
+import { Poll } from "chat";
+
+bot.onNewMention(async (thread, message) => {
+  await thread.post(
+    <Poll
+      id="fav-color"
+      question="What is your favorite color?"
+      options={["Red", "Blue", "Green"]}
+    />
+  );
+});
+```
+
+## Handle votes
+
+Vote callbacks use the same `onAction` pattern as [buttons](/docs/actions). The `actionId` matches the poll's `id`, and `value` contains the option text the user voted for.
+
+```typescript title="lib/bot.ts" lineNumbers
+bot.onAction("fav-color", async (event) => {
+  await event.thread.post(
+    `${event.user.fullName} voted for ${event.value}!`
+  );
+});
+```
+
+## Dynamic polls
+
+Create polls from user input:
+
+```tsx title="lib/bot.tsx" lineNumbers
+import { Poll } from "chat";
+
+bot.onNewMention(async (thread, message) => {
+  const text = message.text;
+  await thread.post(
+    <Poll
+      id={`poll-${Date.now()}`}
+      question={text}
+      options={[`${text}-1`, `${text}-2`, `${text}-3`]}
+    />
+  );
+});
+```
+
+## Function-call syntax
+
+Polls also support function-call syntax without JSX:
+
+```typescript title="lib/bot.ts" lineNumbers
+import { Poll } from "chat";
+
+await thread.post(
+  Poll({
+    id: "fav-color",
+    question: "What is your favorite color?",
+    options: ["Red", "Blue", "Green"],
+  })
+);
+```
+
+## Platform support
+
+| Platform | Native polls | Vote callbacks |
+|----------|-------------|----------------|
+| iMessage (remote) | Yes | Yes |
+| iMessage (local) | No | No |
+
+<Callout type="info">
+Polls are currently supported on iMessage in remote mode only. Attempting to post a poll in local mode will throw a `NotImplementedError`.
+</Callout>

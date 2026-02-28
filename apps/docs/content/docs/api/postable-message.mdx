@@ -133,6 +133,33 @@ await thread.post({
   }}
 />
 
+## PostablePoll
+
+Native poll with voting options. See [Polls](/docs/api/polls) for the full API.
+
+```typescript
+import { Poll } from "chat";
+
+await thread.post(Poll({ id: "fav-color", question: "Favorite color?", options: ["Red", "Blue", "Green"] }));
+```
+
+You can also pass a poll with explicit typing:
+
+```typescript
+await thread.post({
+  poll: Poll({ id: "fav-color", question: "Favorite color?", options: ["Red", "Blue", "Green"] }),
+});
+```
+
+<TypeTable
+  type={{
+    poll: {
+      description: 'Poll element.',
+      type: 'PollElement',
+    },
+  }}
+/>
+
 ## AsyncIterable (streaming)
 
 An async iterable of strings, like the AI SDK's `textStream`. The SDK streams the message in real time using platform-native APIs where available.

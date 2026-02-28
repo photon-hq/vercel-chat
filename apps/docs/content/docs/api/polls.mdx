@@ -1,0 +1,98 @@
+---
+title: Polls
+description: Poll components for cross-platform native voting.
+type: reference
+---
+
+Poll components render as native polls on supported platforms — iMessage polls via advanced-imessage-kit.
+
+```typescript
+import { Poll } from "chat";
+```
+
+Supports both function-call and JSX syntax. Function-call syntax is recommended for better type inference.
+
+## Poll
+
+Creates a poll element that can be posted to a thread.
+
+```typescript
+Poll({
+  id: "fav-color",
+  question: "What is your favorite color?",
+  options: ["Red", "Blue", "Green"],
+})
+```
+
+<TypeTable
+  type={{
+    id: {
+      description: 'Unique identifier, used as actionId for vote callbacks via onAction.',
+      type: 'string',
+    },
+    question: {
+      description: 'The poll question displayed to users.',
+      type: 'string',
+    },
+    options: {
+      description: 'List of options to vote on.',
+      type: 'string[]',
+    },
+  }}
+/>
+
+## PollElement
+
+The object returned by `Poll()`. Can be passed directly to `thread.post()`.
+
+```typescript
+interface PollElement {
+  type: "poll";
+  id: string;
+  question: string;
+  options: string[];
+}
+```
+
+## PostablePoll
+
+Wrapper type for posting a poll with explicit typing:
+
+```typescript
+await thread.post({ poll: Poll({ id: "q1", question: "Yes or no?", options: ["Yes", "No"] }) });
+```
+
+<TypeTable
+  type={{
+    poll: {
+      description: 'Poll element.',
+      type: 'PollElement',
+    },
+  }}
+/>
+
+## Vote callbacks
+
+When a user votes on a poll, the adapter fires an action event routed through `onAction`. The `actionId` matches the poll's `id`, and `value` contains the option text.
+
+```typescript
+bot.onAction("fav-color", async (event) => {
+  // event.actionId === "fav-color"
+  // event.value === "Red" (the option the user voted for)
+  await event.thread.post(`${event.user.fullName} voted for ${event.value}!`);
+});
+```
+
+See [Actions](/docs/actions) for more on action handlers.
+
+## isPollElement
+
+Type guard to check if a value is a `PollElement`.
+
+```typescript
+import { isPollElement } from "chat";
+
+if (isPollElement(message)) {
+  console.log(message.question, message.options);
+}
+```

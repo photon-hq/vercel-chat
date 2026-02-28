@@ -157,6 +157,7 @@ IMESSAGE_API_KEY=...                 # Required for remote mode
 |---------|-----------|
 | Mentions | DMs only |
 | Reactions (add/remove) | Remote only |
+| Polls | Remote only |
 | Cards | No |
 | Modals | No |
 | Streaming | No |
@@ -166,6 +167,34 @@ IMESSAGE_API_KEY=...                 # Required for remote mode
 | Typing indicator | Remote only |
 | Message history | Yes |
 | Message editing | Remote only |
+
+## Polls
+
+Remote mode supports native iMessage polls. Post a `Poll` to create a voting experience directly in the chat. Vote callbacks are delivered via `onAction`.
+
+```tsx title="lib/bot.tsx" lineNumbers
+import { Poll } from "chat";
+
+bot.onNewMention(async (thread, message) => {
+  await thread.post(
+    Poll({
+      id: "fav-color",
+      question: "What is your favorite color?",
+      options: ["Red", "Blue", "Green"],
+    })
+  );
+});
+
+bot.onAction("fav-color", async (event) => {
+  await event.thread.post(`${event.user.fullName} voted for ${event.value}!`);
+});
+```
+
+<Callout type="info">
+Polls are only available in remote mode. Attempting to post a poll in local mode will throw a `NotImplementedError`.
+</Callout>
+
+See the [Polls guide](/docs/polls) for more details.
 
 ## Tapback reactions
 
@@ -186,6 +215,7 @@ iMessage uses tapbacks instead of emoji reactions. The adapter maps standard emo
 - **Formatting**: iMessage is plain-text only. Markdown formatting (bold, italic, etc.) is stripped when sending messages, preserving only the text content.
 - **Platform**: Local mode requires macOS. Remote mode can run on any platform — [Photon](https://photon.codes) manages the iMessage infrastructure for you.
 - **Cards and modals**: iMessage has no support for structured card layouts or interactive modals.
+- **Polls**: Only supported in remote mode. Local mode does not have poll support.
 
 ## Troubleshooting
 

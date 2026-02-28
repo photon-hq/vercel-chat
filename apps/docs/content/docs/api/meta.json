@@ -8,6 +8,7 @@
     "message",
     "postable-message",
     "cards",
+    "polls",
     "markdown",
     "modals"
   ]
